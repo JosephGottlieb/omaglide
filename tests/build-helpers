@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Test-only tools built from bundled sources; no downloads or root privileges.
+set -euo pipefail
+test_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+build_dir="$test_dir/../.test-build"
+mkdir -p "$build_dir/keyboard-build" "$build_dir/pointer-build"
+wayland-scanner client-header "$test_dir/protocols/virtual-keyboard-unstable-v1.xml" "$build_dir/keyboard-build/virtual-keyboard-client-protocol.h"
+wayland-scanner private-code "$test_dir/protocols/virtual-keyboard-unstable-v1.xml" "$build_dir/keyboard-build/virtual-keyboard-protocol.c"
+wayland-scanner client-header "$test_dir/protocols/wlr-virtual-pointer-unstable-v1.xml" "$build_dir/pointer-build/wlr-virtual-pointer-client-protocol.h"
+wayland-scanner private-code "$test_dir/protocols/wlr-virtual-pointer-unstable-v1.xml" "$build_dir/pointer-build/wlr-virtual-pointer-protocol.c"
+cc -std=c11 -O2 -Wall -Wextra -Werror -I"$build_dir/keyboard-build" "$test_dir/virtual-keyboard.c" "$build_dir/keyboard-build/virtual-keyboard-protocol.c" -o "$build_dir/keyboard-build/virtual-keyboard" $(pkg-config --cflags --libs wayland-client xkbcommon)
+cc -std=c11 -O2 -Wall -Wextra -Werror -I"$build_dir/pointer-build" "$test_dir/virtual-pointer.c" "$build_dir/pointer-build/wlr-virtual-pointer-protocol.c" -o "$build_dir/pointer-build/virtual-pointer" $(pkg-config --cflags --libs wayland-client)

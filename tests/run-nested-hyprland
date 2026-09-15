@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# An opt-in Wayland integration sandbox; never starts automatically in unit tests.
+# The nested backend can create a normal test window on the existing desktop;
+# setup-nested-output replaces it with an isolated headless test output.
+# This is nested, not pure headless (Aquamarine 0.14 requires a GBM allocator).
+set -euo pipefail
+
+test_seconds="${1:-180}"
+if [[ ! "$test_seconds" =~ ^[0-9]+$ ]] || ((test_seconds < 10 || test_seconds > 600)); then
+    echo 'Usage: run-nested-hyprland [10..600 seconds]' >&2
+    exit 2
+fi
+for test_program in bwrap timeout Hyprland dbus-run-session; do
+    command -v "$test_program" >/dev/null
+done
+test_parent_display="${WAYLAND_DISPLAY:?A running parent Wayland compositor is required}"
+if [[ "$test_parent_display" != /* ]]; then
+    test_parent_display="${XDG_RUNTIME_DIR:?}/$test_parent_display"
+fi
+[[ -S "$test_parent_display" ]] || { echo 'Parent Wayland socket is absent' >&2; exit 1; }
+[[ -c /dev/dri/renderD128 ]] || { echo 'Expected render-only DRM node is absent' >&2; exit 1; }
+test_source_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+test_root="$(mktemp -d /tmp/od.XXXXXX)"
+# Linux AF_UNIX paths are limited to108 bytes; Hyprland appends its long
+# instance signature and socket name, so the test runtime path must be short.
+mkdir -m 700 -- "$test_root/r" "$test_root/config" "$test_root/cache" "$test_root/data" "$test_root/state"
+printf 'Nested test directory (retained for diagnosis): %s\n' "$test_root"
+printf 'Own compositor sockets will be under: %s/r/hypr\n' "$test_root"
+printf 'Automatic teardown after %s seconds; Ctrl-C also stops only this sandbox.\n' "$test_seconds"
+
+# HOME's value is preserved, but its mount is a fresh private tmpfs. Only the
+# plugin checkout is mounted back read-only; personal config/secrets are hidden.
+# All XDG state is redirected to the new private test directory.
+# /run, /dev and /tmp are private. No physical card, input, VT, seatd or
+# system/session bus socket is exposed. renderD128 cannot acquire DRM master.
+# The invalid LIBSEAT_BACKEND fails closed before trying any physical seat.
+# --unshare-pid + --die-with-parent provide teardown of this sandbox's children;
+# timeout also provides a bounded escape independent of any QML event loop.
+exec timeout --signal=TERM --kill-after=3s "${test_seconds}s" \
+    bwrap --unshare-all --die-with-parent --new-session \
+    --ro-bind / / --dev /dev --proc /proc \
+    --tmpfs /run --tmpfs /tmp --tmpfs /var/tmp \
+    --tmpfs "$HOME" --ro-bind "$test_source_dir/.." "$test_source_dir/.." \
+    --dev-bind /dev/dri/renderD128 /dev/dri/renderD128 \
+    --ro-bind "$test_parent_display" /run/omadesktop-parent-wayland \
+    --bind "$test_root" "$test_root" --chdir "$test_root" \
+    --clearenv --setenv PATH /usr/bin --setenv HOME "$HOME" \
+    --setenv LANG C.UTF-8 \
+    --setenv XDG_RUNTIME_DIR "$test_root/r" \
+    --setenv XDG_CONFIG_HOME "$test_root/config" \
+    --setenv XDG_CACHE_HOME "$test_root/cache" \
+    --setenv XDG_DATA_HOME "$test_root/data" \
+    --setenv XDG_STATE_HOME "$test_root/state" \
+    --setenv WAYLAND_DISPLAY /run/omadesktop-parent-wayland \
+    --setenv LIBSEAT_BACKEND omadesktop-test-disabled \
+    --setenv HYPRLAND_NO_SD_VARS 1 --setenv HYPRLAND_NO_SD_NOTIFY 1 \
+    --setenv HYPRLAND_NO_RT 1 --setenv QT_QPA_PLATFORM wayland \
+    /usr/bin/dbus-run-session -- /usr/bin/Hyprland \
+    --config "$test_source_dir/nested-hyprland.lua"

@@ -1,0 +1,4 @@
+.test-build/
+__pycache__/
+*.pyc
+*.log

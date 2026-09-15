@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "hjklcc.omaglide",
+  "name": "OmaGlide",
+  "version": "0.2.0",
+  "author": "hjklcc",
+  "license": "MIT",
+  "description": "Resizable window and occupied-workspace carousels with native-resolution previews.",
+  "kinds": ["service"],
+  "keepLoaded": false,
+  "entryPoints": {"service": "Carousel.qml"},
+  "service": {
+    "displayName": "OmaGlide",
+    "description": "Glide between windows and occupied workspaces. No bar widget.",
+    "category": "Desktop",
+    "allowMultiple": false
+  }
+}

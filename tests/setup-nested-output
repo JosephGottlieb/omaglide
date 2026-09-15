@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Opt-in output setup for run-nested-hyprland; never touches default hyprctl.
+
+Without --apply this performs read-only identity checks and prints the plan.
+This helper neither launches nor stops compositors. The runner owns teardown.
+"""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import socket
+import stat
+import struct
+import subprocess
+import sys
+import time
+
+
+EXPECTED_CONFIG = Path(__file__).resolve().with_name("nested-hyprland.lua")
+RUNTIME_PATTERN = re.compile(r"/tmp/od\.[A-Za-z0-9]{6}/r")
+WAYLAND_OUTPUT = re.compile(r"WAYLAND-[0-9]+")
+
+
+def owned_directory(path):
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise RuntimeError(f"Not an owned, non-symlink directory: {path}")
+    if info.st_mode & 0o077:
+        raise RuntimeError(f"Directory is not private (0700 required): {path}")
+
+
+class NestedCompositor:
+    def __init__(self, runtime):
+        if not RUNTIME_PATTERN.fullmatch(runtime):
+            raise RuntimeError("Expected the exact /tmp/od.XXXXXX/r printed by the runner")
+        self.runtime = Path(runtime)
+        if self.runtime.resolve() != self.runtime:
+            raise RuntimeError("Refusing a symlinked runtime")
+        for path in (self.runtime.parent, self.runtime, self.runtime / "hypr"):
+            owned_directory(path)
+        instances = [path for path in (self.runtime / "hypr").iterdir()
+                     if (path / ".socket.sock").exists()]
+        if len(instances) != 1:
+            raise RuntimeError("Expected exactly one live test-instance socket")
+        self.instance = instances[0]
+        owned_directory(self.instance)
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", self.instance.name):
+            raise RuntimeError("Unexpected instance signature")
+        self.socket_path = self.instance / ".socket.sock"
+        self.pid = None
+        self.verify_peer()
+
+    def verify_peer(self):
+        """Recheck the actual socket peer before every targeted hyprctl call."""
+        info = self.socket_path.lstat()
+        if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid():
+            raise RuntimeError("Refusing an unowned/non-socket IPC endpoint")
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(2)
+            connection.connect(str(self.socket_path))
+            pid, uid, _gid = struct.unpack("3i", connection.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+        if uid != os.getuid() or (self.pid is not None and self.pid != pid):
+            raise RuntimeError("Test compositor peer changed or belongs to another user")
+        process = Path("/proc") / str(pid)
+        if os.readlink(process / "exe") != "/usr/bin/Hyprland":
+            raise RuntimeError("IPC peer is not /usr/bin/Hyprland")
+        argv = (process / "cmdline").read_bytes().rstrip(b"\0").split(b"\0")
+        expected = [b"/usr/bin/Hyprland", b"--config", os.fsencode(EXPECTED_CONFIG)]
+        if argv != expected:
+            raise RuntimeError("IPC peer was not started with the isolated test config")
+        environment = dict(part.split(b"=", 1) for part in
+                           (process / "environ").read_bytes().split(b"\0") if b"=" in part)
+        required = {
+            b"XDG_RUNTIME_DIR": os.fsencode(self.runtime),
+            b"LIBSEAT_BACKEND": b"omadesktop-test-disabled",
+            b"HYPRLAND_NO_SD_VARS": b"1",
+            b"HYPRLAND_NO_SD_NOTIFY": b"1",
+        }
+        if any(environment.get(key) != value for key, value in required.items()):
+            raise RuntimeError("IPC peer lacks the runner's isolation environment")
+        for namespace in ("pid", "mnt"):
+            if os.readlink(process / "ns" / namespace) == os.readlink(Path("/proc/self/ns") / namespace):
+                raise RuntimeError("IPC peer is not inside the test PID/mount sandbox")
+        self.pid = pid
+
+    def ctl(self, *arguments):
+        self.verify_peer()
+        environment = os.environ.copy()
+        environment.update(XDG_RUNTIME_DIR=str(self.runtime),
+                           HYPRLAND_INSTANCE_SIGNATURE=self.instance.name)
+        result = subprocess.run(
+            ["/usr/bin/hyprctl", "-i", self.instance.name, *arguments],
+            env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=3, check=False,
+        )
+        if result.returncode:
+            raise RuntimeError(f"Targeted hyprctl failed: {result.stderr.decode(errors='replace')[:500]}")
+        return result.stdout.decode()
+
+    def monitors(self):
+        monitors = json.loads(self.ctl("-j", "monitors", "all"))
+        if not isinstance(monitors, list):
+            raise RuntimeError("Unexpected monitor response")
+        for monitor in monitors:
+            name = monitor.get("name", "")
+            if name != "TEST-1" and not WAYLAND_OUTPUT.fullmatch(name):
+                raise RuntimeError(f"Unexpected output in isolated test instance: {name!r}")
+        return monitors
+
+    def apply(self):
+        monitors = self.monitors()
+        if not any(monitor["name"] == "TEST-1" for monitor in monitors):
+            result = self.ctl("output", "create", "headless", "TEST-1")
+            if result.strip() != "ok":
+                raise RuntimeError(f"Creating TEST-1 failed: {result[:500]}")
+        result = self.ctl("eval", 'hl.monitor({output="TEST-1",mode="1440x900@60",position="0x0",scale=1})')
+        if "error" in result.lower():
+            raise RuntimeError(f"Configuring TEST-1 failed: {result[:500]}")
+        # Aquamarine's nested WAYLAND output may arrive after initial startup.
+        # Wait a bounded settling interval; remove it only after TEST-1 is ready.
+        started = time.monotonic()
+        stable_since = None
+        removed = []
+        while time.monotonic() - started < 8:
+            monitors = self.monitors()
+            test_monitor = next((monitor for monitor in monitors if monitor["name"] == "TEST-1"), {})
+            ready = (test_monitor.get("width") == 1440 and test_monitor.get("height") == 900
+                     and test_monitor.get("scale") == 1 and not test_monitor.get("disabled", False))
+            wayland_outputs = [monitor["name"] for monitor in monitors
+                               if WAYLAND_OUTPUT.fullmatch(monitor["name"])]
+            if ready and wayland_outputs:
+                for name in wayland_outputs:
+                    result = self.ctl("output", "remove", name)
+                    if result.strip() != "ok":
+                        raise RuntimeError(f"Removing nested {name} failed: {result[:500]}")
+                    removed.append(name)
+                stable_since = None
+            elif ready:
+                stable_since = stable_since or time.monotonic()
+                if time.monotonic() - started >= 4 and time.monotonic() - stable_since >= 1:
+                    return {"runtime": str(self.runtime), "instance": self.instance.name,
+                            "pid": self.pid, "monitors": monitors, "removedNestedOutputs": removed}
+            else:
+                stable_since = None
+            time.sleep(0.1)
+        raise RuntimeError("TEST-1 did not settle as the sole 1440x900 test output within 8 seconds")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("runtime", help="Exact /tmp/od.XXXXXX/r printed by the test runner")
+    parser.add_argument("--apply", action="store_true", help="Create/configure only the verified test instance's outputs")
+    options = parser.parse_args()
+    compositor = NestedCompositor(options.runtime)
+    if options.apply:
+        result = compositor.apply()
+    else:
+        result = {"runtime": str(compositor.runtime), "instance": compositor.instance.name,
+                  "pid": compositor.pid, "monitors": compositor.monitors(), "readOnly": True,
+                  "plan": "Create/configure TEST-1 at 1440x900; remove only this instance's WAYLAND-* outputs after settling"}
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        print(f"Nested output setup refused or failed: {error}", file=sys.stderr)
+        sys.exit(1)
