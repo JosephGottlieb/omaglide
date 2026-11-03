@@ -11,6 +11,12 @@ ShellRoot {
     property int writes: 0
     property var saved: ({})
     property int appKeys: 0
+    property bool recolored: false
+    readonly property var appColors: ({
+        Alpha: "#274e67", Beta: "#684245", Gamma: "#496841", Delta: "#9c6b23",
+        Echo: "#266c91", Foxtrot: "#853471", Golf: "#28795f", Hotel: "#aa452c",
+        India: "#413991", Juliet: "#76982b", Kilo: "#2b8598", Lima: "#a37687"
+    })
     Component.onCompleted: if (!armed) Qt.quit()
     Timer { interval: 120000; running: true; onTriggered: Qt.quit() }
     QtObject {
@@ -26,6 +32,7 @@ ShellRoot {
         id: carousel
         shell: memoryShell
         shortAppId: "omaglide-isolated-test"
+        groupApps: false
     }
     Variants {
         model: ["Alpha", "Beta", "Gamma"]
@@ -34,7 +41,8 @@ ShellRoot {
             required property string modelData
             title: "OmaGlide fixture " + modelData
             implicitWidth: 640; implicitHeight: 480; visible: harness.armed
-            color: modelData === "Alpha" ? "#274e67" : modelData === "Beta" ? "#684245" : "#496841"
+            color: harness.recolored ? "#e02b91"
+                : harness.appColors[modelData] || "#496841"
             Text { anchors.centerIn: parent; text: application.title; color: "white"; font.pixelSize: 32 }
             Item { anchors.fill: parent; focus: true; Keys.onPressed: harness.appKeys++ }
         }
@@ -49,5 +57,6 @@ ShellRoot {
                 appKeys: harness.appKeys })
         }
         function done(): void { Qt.quit() }
+        function recolor(): void { if (harness.armed) harness.recolored = true }
     }
 }

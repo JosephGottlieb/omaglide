@@ -1,6 +1,109 @@
 // Pure logic for the task switcher — no Quickshell imports so it stays testable.
 .pragma library
 
+function filterEntries(entries, query) {
+    const words = String(query || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().split(/\s+/).filter(Boolean);
+    if (!Array.isArray(entries)) return [];
+    if (!words.length) return entries.slice();
+    return entries.filter(entry => {
+        const fields = [entry.title, entry.cls, entry.workspaceName, entry.workspaceId];
+        for (const window of entry.windows || []) fields.push(window.title, window.cls,
+            window.workspaceName, window.workspaceId);
+        const haystack = fields.join(" ").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        return words.every(word => haystack.includes(word));
+    });
+}
+
+// Exposé packs windows into centered rows by their real aspect ratios, like
+// macOS Mission Control: every tile takes its window's shape (no letterbox
+// cells), rows share one height, and MRU order reads left to right.
+// Returns { rows: [[index]], cards: [{x, y, width, height, caption, cardHeight}], scale }
+// where height is the PREVIEW height and the caption space sits below it.
+function exposeAspect(value) {
+    const ratio = finiteNumber(value);
+    return Number.isFinite(ratio) && ratio > 0 ? clamp(ratio, 0.2, 6, 1.6) : 1.6;
+}
+
+function splitRows(ratios, rowCount) {
+    const total = ratios.reduce((sum, ratio) => sum + ratio, 0);
+    const rows = Array.from({ length: rowCount }, () => []);
+    let accumulated = 0;
+    ratios.forEach((ratio, index) => {
+        const row = Math.min(rowCount - 1, Math.floor((accumulated + ratio / 2) / total * rowCount));
+        rows[row].push(index);
+        accumulated += ratio;
+    });
+    return rows.filter(row => row.length);
+}
+
+function exposeLayout(aspects, width, height, options) {
+    const opts = options || {};
+    const w = clamp(width, 1, 100000, 1440), h = clamp(height, 1, 100000, 800);
+    const ratios = (Array.isArray(aspects) ? aspects : []).map(exposeAspect);
+    const count = ratios.length;
+    if (!count) return { rows: [], cards: [], rowHeight: 0 };
+    const gap = clamp(opts.gap, 0, 200, Math.min(32, w / (count * 3), h / (count * 3)));
+    // Captions never take more than a slice of tiny screens.
+    const caption = Math.min(clamp(opts.caption, 0, 200, 0), h * 0.12);
+    // A lone window should still read as a window on a desktop, not fill it.
+    const maxHeight = clamp(opts.maxHeight, 1, 100000, h * 0.82);
+    let best = null;
+    for (let rowCount = 1; rowCount <= count; rowCount++) {
+        const rows = splitRows(ratios, rowCount);
+        const sums = rows.map(row => row.reduce((sum, index) => sum + ratios[index], 0));
+        const widthLimit = Math.min.apply(null, rows.map((row, r) => (w - gap * (row.length - 1)) / sums[r]));
+        const heightLimit = (h - gap * (rows.length - 1)) / rows.length - caption;
+        const rowHeight = Math.min(widthLimit, heightLimit, maxHeight);
+        if (!(rowHeight > 0)) continue;
+        const area = rowHeight * rowHeight * sums.reduce((a, b) => a + b, 0);
+        // Prefer fewer rows on ties: they keep the MRU reading order clearer.
+        if (!best || area > best.area * 1.0001) best = { rows: rows, sums: sums, rowHeight: rowHeight, area: area };
+    }
+    if (!best) return { rows: [], cards: ratios.map(() => ({ x: 0, y: 0, width: 0, height: 0, caption: 0, cardHeight: 0 })), rowHeight: 0 };
+    const cards = new Array(count);
+    const blockHeight = best.rows.length * (best.rowHeight + caption) + (best.rows.length - 1) * gap;
+    let y = (h - blockHeight) / 2;
+    best.rows.forEach((row, r) => {
+        let x = (w - best.sums[r] * best.rowHeight - (row.length - 1) * gap) / 2;
+        for (const index of row) {
+            const cardWidth = ratios[index] * best.rowHeight;
+            cards[index] = { x: x, y: y, width: cardWidth, height: best.rowHeight,
+                caption: caption, cardHeight: best.rowHeight + caption };
+            x += cardWidth + gap;
+        }
+        y += best.rowHeight + caption + gap;
+    });
+    return { rows: best.rows, cards: cards, rowHeight: best.rowHeight };
+}
+
+// Up/Down in Exposé: the tile in the adjacent row whose center is nearest
+// horizontally. Rows wrap, matching the carousel's ring navigation.
+function exposeMove(layout, index, deltaRows) {
+    const rows = layout && layout.rows || [];
+    if (!rows.length) return 0;
+    const current = rows.findIndex(row => row.indexOf(index) >= 0);
+    if (current < 0) return rows[0][0];
+    const target = rows[wrapIndex(current + deltaRows, rows.length)];
+    const card = layout.cards[index];
+    const center = card.x + card.width / 2;
+    let best = target[0], distance = Infinity;
+    for (const candidate of target) {
+        const other = layout.cards[candidate];
+        const d = Math.abs(other.x + other.width / 2 - center);
+        if (d < distance) { distance = d; best = candidate; }
+    }
+    return best;
+}
+
+// Linear blend between two rectangles, used for the Exposé fly-in from each
+// window's real desktop position into its tile.
+function mixRect(from, to, progress) {
+    const t = clamp(progress, 0, 1, 1);
+    const mix = (a, b) => a + (b - a) * t;
+    return { x: mix(from.x, to.x), y: mix(from.y, to.y),
+        width: mix(from.width, to.width), height: mix(from.height, to.height) };
+}
+
 // Numeric settings may arrive from JSON or IPC as strings. Treat absent and
 // non-finite values as missing instead of allowing NaN into QML geometry.
 function finiteNumber(value) {
@@ -128,6 +231,54 @@ function orderClients(clients) {
         return a.index - b.index;
     });
     return rest.map(entry => entry.client).concat(active);
+}
+
+// App grouping is deliberately based on the complete class, not a prefix:
+// browsers can give independently launched web apps their own distinct classes.
+function appClassKey(cls) {
+    return String(cls || "").normalize("NFKC").trim().toLowerCase();
+}
+
+// Accept the same MRU-ordered records used by the window carousel. Keep every
+// native capture/activation field on the representative, while exposing all
+// member windows for search and the window count. The current app goes last,
+// just like the active window in orderClients(), so one forward step chooses
+// the previous app rather than another window belonging to the current app.
+function groupAppEntries(entries, activeAddress) {
+    if (!Array.isArray(entries)) return [];
+    const groups = [];
+    const byClass = Object.create(null);
+    let activeGroup = null;
+    for (let index = 0; index < entries.length; index++) {
+        const entry = entries[index];
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+        const cls = appClassKey(entry.cls);
+        // An absent class is not evidence that two windows belong to one app.
+        const appKey = cls ? "app:" + cls
+            : "window:" + (entry.address || entry.key || index);
+        let group = cls ? byClass[appKey] : null;
+        if (!group) {
+            group = { appKey: appKey, representative: entry, windows: [] };
+            if (cls) byClass[appKey] = group;
+            groups.push(group);
+        }
+        group.windows.push(entry);
+        if (activeAddress && entry.address === activeAddress) {
+            group.representative = entry;
+            activeGroup = group;
+        }
+    }
+    if (activeGroup) {
+        groups.splice(groups.indexOf(activeGroup), 1);
+        groups.push(activeGroup);
+    }
+    return groups.map(group => Object.assign({}, group.representative, {
+        key: group.appKey,
+        appKey: group.appKey,
+        grouped: true,
+        count: group.windows.length,
+        windows: group.windows
+    }));
 }
 
 // Group the cycle-ordered windows by workspace (ascending id), preserving the

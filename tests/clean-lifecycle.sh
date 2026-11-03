@@ -22,16 +22,16 @@ start_shell() {
   return 1
 }
 enabled() {
-  omarchy plugin list --json | jq -e 'any(.[]; .id == "hjklcc.omaglide" and .enabled == true)' >/dev/null
+  omarchy plugin list --json | jq -e 'any(.[]; .id == "josephgottlieb.omaglide" and .enabled == true)' >/dev/null
 }
 start_shell
 omarchy plugin add "file://$test_source" --enable --yes
 enabled
 omarchy-shell omaglide show
 omarchy-shell omaglide hide
-omarchy plugin disable hjklcc.omaglide
+omarchy plugin disable josephgottlieb.omaglide
 if enabled; then exit 1; fi
-omarchy plugin enable hjklcc.omaglide
+omarchy plugin enable josephgottlieb.omaglide
 enabled
 kill "$shell_pid"
 wait "$shell_pid" || true
@@ -40,7 +40,7 @@ start_shell
 enabled
 omarchy-shell omaglide show
 omarchy-shell omaglide hide
-omarchy plugin remove hjklcc.omaglide --yes
-[[ ! -e $HOME/.config/omarchy/plugins/hjklcc.omaglide ]]
+omarchy plugin remove josephgottlieb.omaglide --yes
+[[ ! -e $HOME/.config/omarchy/plugins/josephgottlieb.omaglide ]]
 [[ $(sha256sum "$HOME/.config/hypr/bindings.lua") == "$before" ]]
 echo 'PASS: clean add, enable, show/hide, disable, re-enable, restart, remove; bindings unchanged'

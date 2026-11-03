@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "hjklcc.omaglide",
+  "id": "josephgottlieb.omaglide",
   "name": "OmaGlide",
-  "version": "0.2.0",
-  "author": "hjklcc",
+  "version": "0.3.0",
+  "author": "Joseph Woolls",
   "license": "MIT",
   "description": "Resizable window and occupied-workspace carousels with native-resolution previews.",
   "kinds": ["service"],
