@@ -34,6 +34,23 @@ Item {
         // keeps its quick 50ms slide.
         to: 1; duration: root.exposed ? root.exposeDuration : root.entranceDuration; easing.type: Easing.OutCubic
     }
+    // Leaving Exposé plays the fly-in backwards: windows on the desktop glide
+    // back to where they really are and the rest fade, before the layer
+    // unmaps. Input is ignored meanwhile; reopening either Exposé reverses it.
+    property bool closing: false
+    property var closingEntry: null
+    NumberAnimation {
+        id: exitAnimation
+        target: root; property: "entranceProgress"
+        to: 0; duration: 220; easing.type: Easing.InOutCubic
+        onFinished: if (root.closing) root.finishClose(root.closingEntry)
+    }
+    function cancelClosing() {
+        if (!closing) return
+        exitAnimation.stop()
+        closing = false
+        closingEntry = null
+    }
     property bool opening: false
     property bool holdMode: true
     property bool resizing: false
@@ -139,6 +156,10 @@ Item {
     property var liveChords: Shortcuts.currentChords([], shortAppId)
     readonly property bool blurBackground: settings.blurBackground !== false
     readonly property bool pointerFollowsFocus: settings.pointerFollowsFocus !== false
+    // Slider style: "thumbnails" (live previews) or "icons" (a Cmd+Tab-style
+    // row of app icons). Workspace mode always uses thumbnails.
+    readonly property string sliderStyle: settings.sliderStyle === "icons" ? "icons" : "thumbnails"
+    readonly property bool iconStyle: sliderStyle === "icons" && mode === "windows" && !exposed
     property string appliedSignature: ""
     property bool pendingApply: false
     property bool pendingFresh: false
@@ -315,7 +336,7 @@ Item {
         if ((!open && !opening) || !Number.isInteger(number) || number < 1 || number > 9) return
         // Number keys are navigation even when the search field has focus.
         // Cancel any snapshot/activation, then jump without waiting for Enter.
-        close(false)
+        close(false, true)
         holdMode = false
         pendingWorkspace = String(number)
         focusTimer.restart()
@@ -336,6 +357,8 @@ Item {
     // Both Exposés share one view; App Exposé narrows it to the focused app.
     // When opening from closed, the class is read from the fresh snapshot.
     function showExpose(app) {
+        const reversing = closing
+        cancelClosing()
         const live = (open || opening) && mode === "windows"
         appExposed = !!app
         if (app && live) {
@@ -345,15 +368,21 @@ Item {
         if (exposed && live) rebuildEntries()
         exposed = true
         if (!live) openSwitcher(false, "windows", 0)
+        else if (reversing) entrance.restart() // Glide back out from where the exit stopped.
         holdMode = false
     }
-    // Mac-style swipes: up opens Exposé, down opens App Exposé; the opposite
-    // swipe (or repeating it) dismisses whichever is showing.
+    // Mission Control swipes. Up opens Exposé; down from Exposé glides back
+    // to the desktop, and down again opens App Exposé (even mid-glide). Up
+    // from App Exposé returns to the desktop. Repeating a view's own opening
+    // swipe leaves it open; down dismisses the slider.
     function swipe(direction) {
-        const showing = (open || opening) && exposed
-        if (direction === "up") showing ? close(false) : expose()
-        else if (showing) close(false)
-        else if (open || opening) close(false)
+        const showing = (open || opening) && exposed && !closing
+        if (direction === "up") {
+            if (!showing) expose()
+            else if (appExposed) close(false)
+        } else if (showing) {
+            if (!appExposed) close(false)
+        } else if ((open || opening) && !closing && !exposed) close(false)
         else appExpose()
     }
     function toggleMode() {
@@ -370,6 +399,7 @@ Item {
         if (shell && shell.updateEntryInline) shell.updateEntryInline(shortAppId, next)
     }
     function cycleSwitcher(delta) {
+        if (closing) close(false, true)
         exposed = false
         if ((open || opening) && mode === carouselMode) { holdMode = true; step(delta) }
         else openSwitcher(true, carouselMode, delta)
@@ -446,10 +476,12 @@ Item {
     }
     function resizeBy(amount) { setSize(preferredWidth + amount) }
     function step(delta) {
+        if (closing) return
         if (opening) { earlySteps += delta; return }
         if (windows.length > 1) position += delta
     }
     function selectIndex(index) {
+        if (closing) return
         if (windows.length) position += Logic.signedDistance(index, position, windows.length)
     }
     function openSwitcher(hold, requestedMode, direction) {
@@ -478,24 +510,47 @@ Item {
         Hyprland.refreshToplevels()
         querySnapshot()
     }
-    function show() { exposed = false; holdMode = false; openSwitcher(false, carouselMode, 0) }
+    function show() {
+        if (closing) close(false, true) // The slider never shares the glide.
+        exposed = false; holdMode = false; openSwitcher(false, carouselMode, 0)
+    }
     function showWindows() { rememberMode("windows"); show() }
     function showWorkspaces() { rememberMode("workspaces"); show() }
     function hide() { close(false) }
-    function toggle() { (open || opening) ? close(false) : show() }
+    function toggle() { (open || opening) && !closing ? close(false) : show() }
     function confirmSelection() {
         if ((open || opening) && holdMode && !resizing && Date.now() - lastCloseRequest > 250)
             close(true)
     }
-    function close(activate) {
+    // immediate skips Exposé's return animation (number-key jumps, a revoked
+    // shortcut inhibitor, or a close that is already animating).
+    function close(activate, immediate) {
         if (activate && !open && !opening) return
         // A quick modifier release can precede the asynchronous snapshot.
         // Commit as soon as its selection exists, without waiting for animation.
         if (activate && opening) { activateAfterOpen = true; return }
+        if (closing) {
+            if (immediate) { exitAnimation.stop(); finishClose(closingEntry) }
+            return
+        }
+        const entry = activate && open && !errorMessage && windows.length ? windows[selected] : null
+        if (exposed && open && !opening && !immediate) {
+            closing = true
+            closingEntry = entry
+            quickLook = false
+            settingsOpen = false
+            entrance.stop()
+            exitAnimation.restart()
+            return
+        }
+        finishClose(entry)
+    }
+    function finishClose(entry) {
+        closing = false
+        closingEntry = null
         focusTimer.stop()
         pendingAddr = ""
         pendingWorkspace = ""
-        const entry = activate && open && !errorMessage && windows.length ? windows[selected] : null
         opening = false
         activateAfterOpen = false
         open = false
@@ -711,14 +766,15 @@ Item {
     GlobalShortcut {
         appid: root.shortAppId; name: "expose"
         onPressed: {
-            if ((root.open || root.opening) && !root.exposed) root.toggleMode()
+            if (root.closing) root.expose()
+            else if ((root.open || root.opening) && !root.exposed) root.toggleMode()
             else if ((root.open || root.opening) && !root.appExposed) root.step(1)
             else root.expose()
         }
     }
     GlobalShortcut {
         appid: root.shortAppId; name: "appExpose"
-        onPressed: (root.open || root.opening) && root.exposed && root.appExposed ? root.step(1) : root.appExpose()
+        onPressed: (root.open || root.opening) && root.exposed && root.appExposed && !root.closing ? root.step(1) : root.appExpose()
     }
     GlobalShortcut { appid: root.shortAppId; name: "gesture-up"; onPressed: root.swipe("up") }
     GlobalShortcut { appid: root.shortAppId; name: "gesture-down"; onPressed: root.swipe("down") }
@@ -752,6 +808,12 @@ Item {
         function expose(): void { root.expose() }
         function appExpose(): void { root.appExpose() }
         function swipe(direction: string): void { root.swipe(direction) }
+        // sliderStyle icons / sliderStyle thumbnails
+        function sliderStyle(style: string): string {
+            if (style !== "icons" && style !== "thumbnails") return "use icons or thumbnails"
+            root.saveSetting("sliderStyle", style)
+            return "ok"
+        }
         // gestures on 4 / gestures off
         function gestures(state: string, fingers: int): string {
             if (state !== "on" && state !== "off") return "use on or off"
@@ -783,7 +845,7 @@ Item {
         function status(): string {
             return JSON.stringify({ open: root.open, mode: root.mode, count: root.windows.length, selected: root.selected,
                 carouselMode: root.carouselMode,
-                exposed: root.exposed, appExposed: root.appExposed, appExposeClass: root.appExposeClass,
+                exposed: root.exposed, closing: root.closing, sliderStyle: root.sliderStyle, iconStyle: root.iconStyle, appExposed: root.appExposed, appExposeClass: root.appExposeClass,
                 gestures: { enabled: root.gesturesEnabled, fingers: root.gestureFingers, status: root.gestureStatus,
                     conflicts: root.gestureConflicts },
                 settingsOpen: root.settingsOpen, quickLook: root.quickLook, searchQuery: root.searchQuery, totalCount: root.allWindows.length,
@@ -834,7 +896,7 @@ Item {
                 id: shortcutGuard
                 window: panel
                 enabled: root.open
-                onCancelled: if (root.open) root.close(false)
+                onCancelled: if (root.open) root.close(false, true)
             }
             readonly property real tileWidth: Math.min(Logic.effectiveTileWidth(root.preferredWidth, layoutWidth, layoutHeight),
                 Math.max(1, (overviewStrip.y - 144 - 54) * 16 / 10))
@@ -881,6 +943,10 @@ Item {
                         width: quickLookFrame.width, height: quickLookFrame.height,
                         hasContent: !!(quickLookLayer.lookCard && quickLookLayer.lookCard.captureMetrics().hasContent) },
                     hintsVisible: footer.visible,
+                    iconSwitcher: { visible: iconSwitcher.visible, x: iconSwitcher.x, y: iconSwitcher.y,
+                        width: iconSwitcher.width, height: iconSwitcher.height, iconSize: iconSwitcher.iconSize,
+                        count: iconItems.count, selected: Array.from({length: iconItems.count}, (_, i) => iconItems.itemAt(i))
+                            .findIndex(item => item && item.isSelected) },
                     carouselY: carouselY, cardHeight: cardHeight,
                     tileWidth: tileWidth, shortcutsInhibited: shortcutGuard.active,
                     capture: card ? card.captureMetrics() : null, loadedPreviews: loaded }
@@ -895,7 +961,7 @@ Item {
                 anchors.fill: parent
                 color: "black"
                 opacity: (root.blurBackground ? (root.exposed ? 0.30 : 0.42) : (root.exposed ? 0.50 : 0.62))
-                    * (root.exposed ? root.entranceProgress : 1)
+                    * (root.exposed ? root.entranceProgress : root.iconStyle ? 0 : 1)
             }
             MouseArea { anchors.fill: parent; onClicked: root.close(false) }
             Item {
@@ -937,6 +1003,7 @@ Item {
                     return true
                 }
                 function handleKey(event, editing) {
+                    if (root.closing) return true
                     const ctrl = event.modifiers & Qt.ControlModifier
                     const plain = !(event.modifiers & (Qt.ControlModifier | Qt.MetaModifier | Qt.AltModifier))
                     // Space previews in Exposé; while searching it stays a space.
@@ -1005,7 +1072,7 @@ Item {
                 Rectangle {
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: root.exposed ? panel.gridTop + panel.gridHeight / 2 - height / 2 : Math.max(92, panel.carouselY - 44)
-                    visible: !root.exposed || !!root.errorMessage || !root.windows.length
+                    visible: (!root.exposed && !root.iconStyle) || !!root.errorMessage || !root.windows.length
                     width: headerText.implicitWidth + 28; height: 28; radius: 14
                     color: Qt.alpha(Color.popups.background, 0.82)
                     Text {
@@ -1049,6 +1116,8 @@ Item {
                 Row {
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: 28
+                    // Cmd+Tab style keeps the screen clear until you type.
+                    visible: !root.iconStyle || !!root.searchQuery || root.settingsOpen
                     spacing: 10
                     Rectangle {
                         width: Math.max(100, Math.min(460, panel.layoutWidth - 200)); height: 44; radius: 22
@@ -1141,7 +1210,8 @@ Item {
                             : Qt.alpha(Color.foreground, root.exposed ? 0.14 : 0.22)
                         readonly property int frameWidth: isSelected ? 3 : 1
                         readonly property real cornerRadius: root.exposed ? 12 + 4 * lookProgress : 14
-                        readonly property bool nearViewport: root.exposed || Math.abs(geometry.offset) < panel.layoutWidth / 2 + panel.tileWidth
+                        readonly property bool nearViewport: !root.iconStyle
+                            && (root.exposed || Math.abs(geometry.offset) < panel.layoutWidth / 2 + panel.tileWidth)
                         readonly property bool captureActive: captureLoader.active || workspaceLoader.active
                         x: root.exposed ? exposeRect.x : panel.layoutWidth / 2 + geometry.offset - width / 2
                         y: root.exposed ? exposeRect.y : panel.carouselY + (panel.cardHeight - height) / 2
@@ -1419,10 +1489,111 @@ Item {
                         }
                     }
                 }
+                // Cmd+Tab-style slider: one frosted panel of app icons, no live
+                // captures at all. The selected icon sits on a soft highlight and
+                // its window title shows underneath.
+                Item {
+                    id: iconSwitcher
+                    visible: root.iconStyle && root.windows.length > 0 && !root.errorMessage
+                    anchors { horizontalCenter: parent.horizontalCenter; verticalCenter: parent.verticalCenter }
+                    readonly property int count: root.windows.length
+                    readonly property real gap: 10
+                    readonly property real iconSize: Math.max(28, Math.min(96,
+                        (panel.layoutWidth - 120 - Math.max(0, count - 1) * gap) / Math.max(1, count) - 24))
+                    readonly property real cell: iconSize + 24
+                    width: count * cell + Math.max(0, count - 1) * gap + 36
+                    height: cell + 36 + 30
+                    opacity: root.open ? 1 : 0
+                    RectangularShadow {
+                        anchors.fill: parent; radius: 28; blur: 40; offset.y: 14
+                        color: Qt.rgba(0, 0, 0, 0.35)
+                    }
+                    Rectangle {
+                        anchors.fill: parent; radius: 28
+                        color: Qt.alpha(Color.popups.background, 0.78)
+                        border.width: 1; border.color: Qt.alpha(Color.foreground, 0.12)
+                    }
+                    Row {
+                        x: 18; y: 18
+                        spacing: iconSwitcher.gap
+                        Repeater {
+                            id: iconItems
+                            model: iconSwitcher.visible ? iconSwitcher.count : 0
+                            delegate: Item {
+                                id: iconItem
+                                required property int index
+                                readonly property var win: root.windows[index] || ({})
+                                readonly property bool isSelected: index === root.selected
+                                width: iconSwitcher.cell; height: iconSwitcher.cell
+                                Rectangle {
+                                    anchors.fill: parent; radius: 18
+                                    color: Qt.alpha(Color.foreground, 0.16)
+                                    visible: iconItem.isSelected
+                                }
+                                Image {
+                                    id: bigIcon
+                                    anchors.centerIn: parent
+                                    width: iconSwitcher.iconSize; height: width
+                                    sourceSize: Qt.size(width * panel.devicePixelRatio, height * panel.devicePixelRatio)
+                                    source: root.iconFor(iconItem.win.cls, iconItem.win.title)
+                                    fillMode: Image.PreserveAspectFit
+                                }
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: bigIcon.status !== Image.Ready
+                                    text: (iconItem.win.cls || "?").charAt(0).toUpperCase()
+                                    color: Color.popups.text; font.family: Style.font.family
+                                    font.pixelSize: iconSwitcher.iconSize * 0.5; font.weight: Font.DemiBold
+                                }
+                                // Window count for grouped apps with several windows.
+                                Rectangle {
+                                    visible: root.groupingActive && iconItem.win.count > 1
+                                    anchors { right: parent.right; top: parent.top; margins: 4 }
+                                    width: Math.max(18, iconCount.implicitWidth + 8); height: 18; radius: 9
+                                    color: Color.accent
+                                    Text {
+                                        id: iconCount
+                                        anchors.centerIn: parent; text: iconItem.win.count || ""
+                                        color: Color.background; font.family: Style.font.family
+                                        font.pixelSize: 10; font.weight: Font.DemiBold
+                                    }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                    // Like Cmd+Tab: moving the pointer over an icon selects it;
+                                    // an icon appearing under a resting pointer does not.
+                                    onPositionChanged: mouse => {
+                                        const point = mapToItem(panel.contentItem, mouse.x, mouse.y)
+                                        const moved = isFinite(root.hoverPosition.x)
+                                            && (Math.abs(point.x - root.hoverPosition.x) > 1 || Math.abs(point.y - root.hoverPosition.y) > 1)
+                                        root.hoverPosition = point
+                                        if (moved) { root.holdMode = false; root.selectIndex(iconItem.index) }
+                                    }
+                                    onClicked: { root.selectIndex(iconItem.index); root.close(true) }
+                                    onWheel: wheel => {
+                                        root.step((wheel.angleDelta.y || wheel.angleDelta.x) > 0 ? -1 : 1)
+                                        wheel.accepted = true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text {
+                        anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 14 }
+                        width: Math.min(parent.width - 36, implicitWidth)
+                        readonly property var win: root.windows.length ? root.windows[root.selected] : null
+                        text: win ? win.title : ""
+                        textFormat: Text.PlainText; elide: Text.ElideRight
+                        horizontalAlignment: Text.AlignHCenter
+                        color: Color.popups.text; font.family: Style.font.family
+                        font.pixelSize: 14; font.weight: Font.Medium
+                    }
+                }
                 Item {
                     id: overviewStrip
                     anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 28 }
-                    visible: !root.exposed && root.windows.length > 0 && !root.errorMessage
+                    visible: !root.exposed && !root.iconStyle && root.windows.length > 0 && !root.errorMessage
                     z: 200
                     readonly property real availableWidth: Math.max(1, parent.width - 96)
                     readonly property real gap: Math.min(12, availableWidth / (Math.max(1, root.windows.length) * 4))
@@ -1433,7 +1604,7 @@ Item {
                     height: root.windows.length ? thumbnailHeight + 28 : 0
                     Repeater {
                         id: overviewItems
-                        model: !root.exposed && !root.errorMessage ? root.windows.length : 0
+                        model: !root.exposed && !root.iconStyle && !root.errorMessage ? root.windows.length : 0
                         delegate: Item {
                             id: overviewItem
                             required property int index
@@ -1566,6 +1737,7 @@ Item {
                             Row {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 y: overviewStrip.thumbnailHeight + 4; height: 14; spacing: overviewItem.iconGap
+                                visible: !selectedBar.visible
                                 Repeater {
                                     model: overviewItem.apps
                                     delegate: Item {
@@ -1588,10 +1760,40 @@ Item {
                                     }
                                 }
                             }
+                            // The selection bar names what is selected: app icon and
+                            // window title, or the workspace and its window count.
                             Rectangle {
+                                id: selectedBar
+                                visible: overviewItem.isSelected
                                 anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                                height: 2; radius: 1
-                                color: Color.accent; visible: overviewItem.isSelected
+                                height: 22; radius: 11
+                                color: Color.accent
+                                Row {
+                                    anchors { fill: parent; leftMargin: 6; rightMargin: 8 }
+                                    spacing: 5
+                                    Image {
+                                        id: barIcon
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: root.mode === "windows" && status === Image.Ready
+                                        width: 14; height: 14
+                                        sourceSize: Qt.size(width * panel.devicePixelRatio, height * panel.devicePixelRatio)
+                                        source: overviewItem.isSelected && root.mode === "windows"
+                                            ? root.iconFor(overviewItem.win.cls, overviewItem.win.title) : ""
+                                        fillMode: Image.PreserveAspectFit
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - (barIcon.visible ? barIcon.width + parent.spacing : 0)
+                                        visible: width >= 24
+                                        text: root.mode === "workspaces"
+                                            ? "Workspace " + overviewItem.win.workspaceName + "  ·  " + overviewItem.win.count
+                                            : overviewItem.win.title
+                                        textFormat: Text.PlainText; elide: Text.ElideRight
+                                        horizontalAlignment: barIcon.visible ? Text.AlignLeft : Text.AlignHCenter
+                                        color: Color.background
+                                        font.family: Style.font.family; font.pixelSize: 11; font.weight: Font.DemiBold
+                                    }
+                                }
                             }
                             MouseArea {
                                 id: overviewMouse

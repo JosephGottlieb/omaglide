@@ -67,7 +67,12 @@ confirms when Alt, Super, or Ctrl is released.
 ### Touchpad gestures
 
 By default a **three-finger swipe up** opens Exposé and a **three-finger swipe
-down** opens App Exposé; the opposite swipe (or repeating it) dismisses either.
+down** opens App Exposé, following Mission Control: swiping down in Exposé
+glides the windows back to their desktop positions, and swiping down again
+(even mid-glide) opens App Exposé; swiping up in App Exposé glides back to the
+desktop. Repeating a view's own opening swipe leaves it open. Hyprland reports
+a swipe only once it ends, so the animation plays after the swipe rather than
+following your fingers.
 Settings turns gestures off or switches them to four fingers
 (`gesturesEnabled`, `gestureFingers`).
 
@@ -79,6 +84,12 @@ If your Hyprland config already uses the same fingers and direction, Hyprland
 keeps that gesture and Settings says so. Settings also warns when libinput's
 three-finger drag (`input:touchpad:drag_3fg`) is using the chosen finger count,
 because those swipes then never reach Hyprland.
+
+**Slider style** in Settings switches the slider between **Thumbnails** (live
+previews with the filmstrip) and **App icons**: a Cmd+Tab-style frosted panel
+with one large icon per app, the selected window's title underneath, no
+screen dimming and no live captures (`sliderStyle`). The search bar appears
+once you type; Ctrl+, opens Settings. Workspace mode always uses thumbnails.
 
 Settings also toggles the frosted background (`blurBackground`), app grouping
 in the slider (`groupApps`), and whether the
@@ -107,7 +118,7 @@ on by default; useful with Hyprland's `cursor:no_warps`).
 | Escape or click the background | Cancel without switching |
 | Type text or Ctrl+F | Search by app, window title, or workspace; 1–9 remain workspace shortcuts |
 | Space in Exposé | Quick Look the selected window; Space/Esc closes it |
-| Three-finger swipe up / down | Exposé / App Exposé; the other swipe dismisses |
+| Three-finger swipe up / down | Exposé / App Exposé; the opposite swipe glides back to the desktop |
 | App Exposé's shortcut (set in Settings) | Exposé of the focused app's windows only |
 | Ctrl+, or the gear icon | Open Settings (shortcuts, gestures, blur, grouping, pointer); shortcut hints show beneath it |
 | + / - | Increase/decrease the center-tile width |
@@ -135,6 +146,10 @@ frame. The animation keeps opacity constant. Navigation and activation remain
 available throughout, and closing does not wait for an exit animation.
 The Alt-release bindings also confirm quick taps that end before the overlay
 receives keyboard focus.
+
+Closing Exposé (Esc, a background click, a swipe or activating a window)
+plays the opening in reverse before the overlay disappears; number-key
+workspace jumps stay instant.
 
 Exposé shows every window separately, including when app grouping is enabled.
 App Exposé is the same view limited to the focused app's windows (matched by
@@ -181,7 +196,8 @@ individual window, or occupied workspace in one row. A grouped tile previews
 the selected window belonging to that app; Up/Down changes that window.
 Workspace thumbnails have large workspace numbers, and small app icons sit
 beneath each preview. The selected thumbnail
-is underlined across its width. Click a thumbnail to switch directly; thumbnails
+carries a bar with its app icon and window title (or workspace and window
+count). Click a thumbnail to switch directly; thumbnails
 shrink to fit on narrow screens. The corner resize area remains available without
 a visible arrow.
 
@@ -245,6 +261,7 @@ omarchy-shell omaglide quickLook        # toggle Quick Look in an open Exposé
 omarchy-shell omaglide appExpose        # Exposé of the focused app's windows
 omarchy-shell omaglide swipe up         # what the gestures call: up or down
 omarchy-shell omaglide gestures on 4    # or: gestures off 3
+omarchy-shell omaglide sliderStyle icons  # or: thumbnails
 omarchy-shell omaglide bind expose "SUPER + E"   # actions: expose, appExpose, toggle, next, previous; "" unbinds
 omarchy-shell omaglide status           # state, geometry, native-buffer metrics
 ```

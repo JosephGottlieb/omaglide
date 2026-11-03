@@ -274,6 +274,45 @@ FocusScope {
                 SectionLabel { text: "APPEARANCE & BEHAVIOR" }
                 Column {
                     width: parent.width; spacing: 2
+                    Rectangle {
+                        width: parent.width; height: 44; radius: 10
+                        color: "transparent"
+                        Text {
+                            anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
+                            text: "Slider style"
+                            color: Color.popups.text; font.family: Style.font.family; font.pixelSize: 14
+                        }
+                        // Thumbnails (live previews) or a Cmd+Tab-style row of app icons.
+                        Rectangle {
+                            anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                            width: styleRow.implicitWidth + 4; height: 30; radius: 8
+                            color: Qt.alpha(Color.foreground, 0.07)
+                            Row {
+                                id: styleRow
+                                anchors { left: parent.left; top: parent.top; margins: 2 }
+                                Repeater {
+                                    model: [{ id: "thumbnails", label: "Thumbnails" }, { id: "icons", label: "App icons" }]
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        readonly property bool chosen: sheet.controller && sheet.controller.sliderStyle === modelData.id
+                                        width: styleText.implicitWidth + 24; height: 26; radius: 6
+                                        color: chosen ? Color.accent : styleMouse.containsMouse ? Qt.alpha(Color.foreground, 0.1) : "transparent"
+                                        Text {
+                                            id: styleText
+                                            anchors.centerIn: parent; text: parent.modelData.label
+                                            color: parent.chosen ? Color.background : Color.popups.text
+                                            font.family: Style.font.family; font.pixelSize: 13; font.weight: Font.DemiBold
+                                        }
+                                        MouseArea {
+                                            id: styleMouse
+                                            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                            onClicked: if (!parent.chosen) sheet.controller.saveSetting("sliderStyle", parent.modelData.id)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     SwitchRow {
                         label: "Blur the desktop behind OmaGlide"
                         checked: sheet.controller ? sheet.controller.blurBackground : true

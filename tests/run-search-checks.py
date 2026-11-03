@@ -354,13 +354,51 @@ try:
     app_view = wait(lambda s: s["open"] and s["exposed"] and s["appExposed"] and s["entranceProgress"] == 1)
     check(app_view["appExposeClass"] and app_view["count"] == 12,
           "swipe down opens App Exposé for the focused app's class", app_view["appExposeClass"])
-    ipc("omaglide", "swipe", "down"); wait(lambda s: not s["open"])
+    ipc("omaglide", "swipe", "down")  # repeating App Exposé's own swipe keeps it open
+    time.sleep(.3)
+    check(status()["open"] and status()["appExposed"], "a second swipe down leaves App Exposé open")
+    ipc("omaglide", "swipe", "up")  # up from App Exposé glides back to the desktop
+    glide = []
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        g = status()
+        glide.append((g["open"], g["closing"], round(g["entranceProgress"], 2)))
+        if not g["open"]: break
+    check(any(o and c and 0 < p < 1 for o, c, p in glide) and not glide[-1][0],
+          "leaving App Exposé animates back to the desktop before closing", glide)
     ipc("omaglide", "swipe", "up")
-    wait(lambda s: s["open"] and s["exposed"] and not s["appExposed"])
+    wait(lambda s: s["open"] and s["exposed"] and not s["appExposed"] and s["entranceProgress"] == 1)
+    ipc("omaglide", "swipe", "up")  # repeating Exposé's swipe keeps it open
+    time.sleep(.3)
+    check(status()["open"] and status()["exposed"] and not status()["closing"], "a second swipe up leaves Exposé open")
+    ipc("omaglide", "swipe", "down")  # down from Exposé glides home...
+    wait(lambda s: s["closing"])
+    ipc("omaglide", "swipe", "down")  # ...and down again, even mid-glide, opens App Exposé
+    reversed_view = wait(lambda s: s["open"] and s["appExposed"] and not s["closing"] and s["entranceProgress"] == 1)
+    check(True, "down, down goes Exposé → desktop → App Exposé without snapping shut")
+    ipc("omaglide", "swipe", "up"); wait(lambda s: not s["open"])
+    ipc("omaglide", "expose"); wait(lambda s: s["exposed"] and s["entranceProgress"] == 1)
     ipc("omaglide", "appExpose")
     wait(lambda s: s["open"] and s["exposed"] and s["appExposed"])
     ipc("omaglide", "swipe", "up"); wait(lambda s: not s["open"])
-    check(True, "swipes open and dismiss both Exposés; App Exposé switches in place")
+    check(True, "swipes follow Mission Control rules; App Exposé switches in place")
+    ipc("omaglide", "sliderStyle", "icons")
+    ipc("omaglide", "windows")
+    icons = wait(lambda s: s["open"] and s["iconStyle"] and s["preview"]["iconSwitcher"]["visible"]
+                 and s["preview"]["iconSwitcher"]["count"] == s["count"])
+    sw = icons["preview"]["iconSwitcher"]
+    check(sw["selected"] == icons["selected"] and not icons["preview"]["overview"]["visible"]
+          and icons["preview"]["loadedPreviews"] == 0 and sw["x"] >= 0 and sw["x"] + sw["width"] <= 1440.01,
+          "App icons style shows a Cmd+Tab row with no live captures", sw)
+    key(15)  # Tab
+    moved_icon = wait(lambda s: s["preview"]["iconSwitcher"]["selected"] == (icons["selected"] + 1) % icons["count"])
+    check(True, "Tab moves the highlighted icon")
+    key(1); wait(lambda s: not s["open"])
+    ipc("omaglide", "sliderStyle", "thumbnails")
+    ipc("omaglide", "windows")
+    wait(lambda s: s["open"] and not s["iconStyle"] and s["preview"]["overview"]["visible"])
+    key(1); wait(lambda s: not s["open"])
+    check(True, "switching back restores the thumbnail slider")
     ipc("omaglide", "gestures", "on", "4")
     four = wait(lambda s: s["gestures"]["fingers"] == 4 and s["gestures"]["status"] == "active", timeout=8)
     errors = compositor.ctl("configerrors").strip()
