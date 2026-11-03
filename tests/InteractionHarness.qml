@@ -33,6 +33,8 @@ ShellRoot {
         shell: memoryShell
         shortAppId: "omaglide-isolated-test"
         groupApps: false
+        // The slider checks exercise live thumbnails; App icons is the product default.
+        settings: ({ sliderStyle: "thumbnails" })
     }
     Variants {
         model: ["Alpha", "Beta", "Gamma"]

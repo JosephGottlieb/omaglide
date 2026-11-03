@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Liquid glass everywhere: the search bar, gear, header and title pills,
+  slider caption strips, filmstrip, Quick Look labels, hints, Settings and
+  workspace previews share one smoked-glass surface (GlassPanel) with light
+  text. Nothing reads the theme's popup colors any more, which could resolve
+  as undefined and fall back to Qt's default white.
+- The accent color has a fallback for the same reason.
+- App icons is now the default slider style.
+
 - Fix: swipes did nothing while Exposé or App Exposé was open, because
   Hyprland suppresses gestures under OmaGlide's own shortcut inhibitor.
   The swipes now set `disable_inhibit`; sessions holding the older swipes

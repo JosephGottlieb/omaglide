@@ -36,7 +36,7 @@ runtime = compositor.runtime
 fixture = runtime.parent / "shell.qml"
 if fixture.exists():
     raise RuntimeError("Refusing to overwrite an existing test fixture")
-for name in ("Carousel.qml", "SettingsPanel.qml", "WorkspacePreview.qml", "logic.js", "workspace.js", "shortcuts.js"):
+for name in ("Carousel.qml", "SettingsPanel.qml", "GlassPanel.qml", "WorkspacePreview.qml", "logic.js", "workspace.js", "shortcuts.js"):
     shutil.copy2(source / name, runtime.parent / name)
 shutil.copy2(source / "tests/InteractionHarness.qml", fixture)
 fixture.write_text(fixture.read_text().replace('["Alpha", "Beta", "Gamma"]',
@@ -245,12 +245,12 @@ try:
     check(not grid["preview"]["overview"]["visible"], "Exposé keeps its full-screen layout")
     check(not grid["preview"]["hintsVisible"], "shortcut hints stay hidden outside Settings")
     tiles = grid["preview"]["tiles"]
-    # The sandbox's theme singleton can fail to resolve (every color reads
-    # #000000, before and after this change); then only widths are comparable.
-    themed = any(t["frameColor"] != "#000000" for t in tiles)
+    # The sandbox's theme singleton can fail to resolve; OmaGlide then uses its
+    # fallback accent, which status reports.
+    accent = grid["accentColor"]
     check(sum(t["selected"] for t in tiles) == 1 and all(
-        (t["frameWidth"] == 3 and (not themed or t["frameColor"] == "#268bd2")) if t["selected"]
-        else (t["frameWidth"] == 1 and (not themed or t["frameColor"] != "#268bd2")) for t in tiles),
+        (t["frameWidth"] == 3 and t["frameColor"] == accent) if t["selected"]
+        else (t["frameWidth"] == 1 and t["frameColor"] != accent) for t in tiles),
         "only the selected tile has a solid accent outline",
         [(t["selected"], t["frameWidth"], t["frameColor"]) for t in tiles])
     check(len(tiles) == 12 and grid_packed(grid), "Exposé packs every window on screen without overlap", grid["preview"]["grid"])
@@ -260,7 +260,7 @@ try:
           "Exposé frames take portrait and wide window shapes without letterboxed cells")
     key(108)  # Down
     moved = wait(lambda s: s["selected"] != grid["selected"] and grid_packed(s))
-    check(all(((t["frameColor"] == "#268bd2") if themed else t["frameWidth"] == 3) == t["selected"] for t in moved["preview"]["tiles"]),
+    check(all((t["frameColor"] == accent) == t["selected"] for t in moved["preview"]["tiles"]),
           "accent outline follows keyboard selection")
     rows = grid["preview"]["grid"]["rows"]
     row_of = lambda index: next(r for r, row in enumerate(rows) if index in row)
@@ -385,7 +385,7 @@ try:
     ipc("omaglide", "sliderStyle", "icons")
     ipc("omaglide", "windows")
     icons = wait(lambda s: s["open"] and s["iconStyle"] and s["preview"]["iconSwitcher"]["visible"]
-                 and s["preview"]["iconSwitcher"]["count"] == s["count"])
+                 and s["preview"]["iconSwitcher"]["count"] == s["count"] and s["preview"]["shortcutsInhibited"])
     sw = icons["preview"]["iconSwitcher"]
     check(sw["selected"] == icons["selected"] and not icons["preview"]["overview"]["visible"]
           and icons["preview"]["loadedPreviews"] == 0 and sw["x"] >= 0 and sw["x"] + sw["width"] <= 1440.01,
@@ -396,7 +396,9 @@ try:
     key(1); wait(lambda s: not s["open"])
     ipc("omaglide", "sliderStyle", "thumbnails")
     ipc("omaglide", "windows")
-    wait(lambda s: s["open"] and not s["iconStyle"] and s["preview"]["overview"]["visible"])
+    # Keys go to the overlay only once it holds focus (the inhibitor follows it).
+    wait(lambda s: s["open"] and not s["iconStyle"] and s["preview"]["overview"]["visible"]
+         and s["preview"]["shortcutsInhibited"] and s["entranceProgress"] == 1)
     key(1); wait(lambda s: not s["open"])
     check(True, "switching back restores the thumbnail slider")
     ipc("omaglide", "gestures", "on", "4")

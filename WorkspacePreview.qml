@@ -65,7 +65,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: Qt.alpha(Color.foreground, 0.025)
+        color: Qt.rgba(1, 1, 1, 0.025)
     }
 
     // Translate the entire union into the available tile using one uniform
@@ -82,9 +82,10 @@ Item {
             width: root.monitorViewport.width * root.fitScale
             height: root.monitorViewport.height * root.fitScale
             z: -1000000000
-            color: Color.popups.background
+            // Smoked glass for the workspace's monitor area.
+            color: Qt.rgba(0.07, 0.07, 0.09, 0.5)
             border.width: 1
-            border.color: root.selected ? Color.menu.selectedBorder : Color.popups.border
+            border.color: Qt.rgba(1, 1, 1, root.selected ? 0.45 : 0.18)
         }
 
         Repeater {
@@ -109,15 +110,15 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent
-                    color: Qt.tint(Color.popups.background, Qt.alpha(Color.foreground, 0.075))
+                    color: Qt.rgba(1, 1, 1, 0.08)
                     border.width: 1
-                    border.color: Color.popups.border
+                    border.color: Qt.rgba(1, 1, 1, 0.14)
                 }
 
                 Text {
                     anchors.centerIn: parent
                     text: String(tile.win.cls || tile.win.title || "?").charAt(0).toUpperCase()
-                    color: Color.popups.text
+                    color: "white"
                     opacity: 0.5
                     font.family: Style.font.family
                     font.pixelSize: Math.max(1, Math.min(42, tile.width * 0.35, tile.height * 0.5))
@@ -180,7 +181,7 @@ Item {
     Text {
         anchors.centerIn: parent
         text: "Empty workspace"
-        color: Color.popups.text
+        color: "white"
         opacity: 0.55
         font.family: Style.font.family
         font.pixelSize: Math.min(16, Math.max(1, root.width / 12))
