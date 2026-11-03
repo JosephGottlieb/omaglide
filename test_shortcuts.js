@@ -95,8 +95,11 @@ test('recognizes App Exposé bindings separately from Exposé', () => {
 });
 test('gesture Lua adds swipes once and asks for a reload to change them', () => {
     const lua = shortcuts.gestureLua(id, true, 3);
-    assert.match(lua, /fingers = 3, direction = "up", action = function\(\) hl\.dispatch\(hl\.dsp\.global\("hjklcc\.omaglide:gesture-up"\)\)/);
+    assert.match(lua, /fingers = 3, direction = "up", disable_inhibit = true, action = function\(\) hl\.dispatch\(hl\.dsp\.global\("hjklcc\.omaglide:gesture-up"\)\)/);
     assert.match(lua, /direction = "down"/);
+    // Exit swipes must still fire while OmaGlide's shortcut inhibitor is active.
+    assert.equal((lua.match(/disable_inhibit = true/g) || []).length, 2);
+    assert.match(lua, /local want = "3\+ni"/);
     assert.match(lua, /if have ~= "off" then return "reload" end/);
     assert.doesNotMatch(lua, /unset/);
     assert.match(shortcuts.gestureLua(id, true, 4), /fingers = 4/);

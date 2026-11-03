@@ -228,9 +228,13 @@ function blurLua(appId, enabled, fresh) {
 //   "same"       already registered as wanted
 //   "registered" just added (check configerrors for a shadowing conflict)
 //   "reload"     a different set is registered; reload, then apply again
+// OmaGlide's own overlay inhibits compositor shortcuts while it is open,
+// and Hyprland suppresses gestures under that inhibitor too, so the
+// swipes that leave Exposé need disable_inhibit. The "+ni" revision marker
+// makes sessions still holding the older swipes reload into these.
 function gestureLua(appId, enabled, fingers) {
     const count = Number(fingers) === 4 ? 4 : 3;
-    const want = enabled ? String(count) : "off";
+    const want = enabled ? count + "+ni" : "off";
     const lines = [
         "local want = " + luaString(want),
         "local have = _G.omaglide_gestures or \"off\"",
@@ -240,7 +244,8 @@ function gestureLua(appId, enabled, fingers) {
     ];
     if (enabled) for (const direction of ["up", "down"])
         lines.push("hl.gesture({ fingers = " + count + ", direction = " + luaString(direction)
-            + ", action = function() hl.dispatch(hl.dsp.global(" + luaString(appId + ":gesture-" + direction) + ")) end })");
+            + ", disable_inhibit = true, action = function() hl.dispatch(hl.dsp.global("
+            + luaString(appId + ":gesture-" + direction) + ")) end })");
     lines.push("return \"registered\"");
     return lines.join("\n");
 }

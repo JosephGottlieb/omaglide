@@ -1504,14 +1504,29 @@ Item {
                     width: count * cell + Math.max(0, count - 1) * gap + 36
                     height: cell + 36 + 30
                     opacity: root.open ? 1 : 0
+                    // Liquid glass: a nearly clear pane over the compositor's blur of
+                    // the desktop (only pixels this panel covers are blurred), a soft
+                    // top sheen and bright hairline edges. Without blur it needs a
+                    // denser tint to stay legible.
+                    readonly property real glassTint: root.blurBackground ? 0.10 : 0.42
                     RectangularShadow {
-                        anchors.fill: parent; radius: 28; blur: 40; offset.y: 14
-                        color: Qt.rgba(0, 0, 0, 0.35)
+                        anchors.fill: parent; radius: 30; blur: 48; offset.y: 18
+                        color: Qt.rgba(0, 0, 0, 0.28)
                     }
                     Rectangle {
-                        anchors.fill: parent; radius: 28
-                        color: Qt.alpha(Color.popups.background, 0.78)
-                        border.width: 1; border.color: Qt.alpha(Color.foreground, 0.12)
+                        anchors.fill: parent; radius: 30
+                        color: root.blurBackground ? Qt.rgba(1, 1, 1, iconSwitcher.glassTint) : Qt.rgba(0.08, 0.08, 0.1, iconSwitcher.glassTint + 0.3)
+                        border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.34)
+                    }
+                    Rectangle {
+                        anchors { fill: parent; margins: 1 }
+                        radius: 29
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.20) }
+                            GradientStop { position: 0.45; color: Qt.rgba(1, 1, 1, 0.04) }
+                            GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0.08) }
+                        }
+                        border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.10)
                     }
                     Row {
                         x: 18; y: 18
@@ -1526,9 +1541,13 @@ Item {
                                 readonly property bool isSelected: index === root.selected
                                 width: iconSwitcher.cell; height: iconSwitcher.cell
                                 Rectangle {
-                                    anchors.fill: parent; radius: 18
-                                    color: Qt.alpha(Color.foreground, 0.16)
+                                    anchors.fill: parent; radius: 20
                                     visible: iconItem.isSelected
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.34) }
+                                        GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0.16) }
+                                    }
+                                    border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.45)
                                 }
                                 Image {
                                     id: bigIcon
@@ -1542,7 +1561,7 @@ Item {
                                     anchors.centerIn: parent
                                     visible: bigIcon.status !== Image.Ready
                                     text: (iconItem.win.cls || "?").charAt(0).toUpperCase()
-                                    color: Color.popups.text; font.family: Style.font.family
+                                    color: "white"; font.family: Style.font.family
                                     font.pixelSize: iconSwitcher.iconSize * 0.5; font.weight: Font.DemiBold
                                 }
                                 // Window count for grouped apps with several windows.
@@ -1586,8 +1605,9 @@ Item {
                         text: win ? win.title : ""
                         textFormat: Text.PlainText; elide: Text.ElideRight
                         horizontalAlignment: Text.AlignHCenter
-                        color: Color.popups.text; font.family: Style.font.family
-                        font.pixelSize: 14; font.weight: Font.Medium
+                        // Light text with a faint shadow reads over any blurred wallpaper.
+                        color: "white"; style: Text.Raised; styleColor: Qt.rgba(0, 0, 0, 0.35)
+                        font.family: Style.font.family; font.pixelSize: 14; font.weight: Font.DemiBold
                     }
                 }
                 Item {
