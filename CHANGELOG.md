@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Mission Control swipe rules: down from Exposé glides back to the desktop and
+  down again opens App Exposé (reversing mid-glide); up from App Exposé glides
+  back. Repeating a view's own swipe leaves it open.
+- Closing Exposé animates the fly-in in reverse before unmapping; number-key
+  jumps stay instant.
+- Slider style setting: Thumbnails or App icons (Cmd+Tab-style frosted icon
+  panel, no captures). IPC `sliderStyle`.
+- The selected filmstrip thumbnail's underline is now a bar with the app icon
+  and window title (workspace and window count in workspace mode).
+
 ## 0.3.0
 
 - The shortcut-hint pill appears only while Settings is open, giving the
