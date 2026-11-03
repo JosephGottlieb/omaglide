@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fix: swipes did nothing while Exposé or App Exposé was open, because
+  Hyprland suppresses gestures under OmaGlide's own shortcut inhibitor.
+  The swipes now set `disable_inhibit`; sessions holding the older swipes
+  reload into the new ones automatically.
+- App icons slider: liquid-glass panel (clear tint over the compositor blur,
+  top sheen, hairline edges, glassy selection) instead of the theme's opaque
+  popup color.
+
 - Mission Control swipe rules: down from Exposé glides back to the desktop and
   down again opens App Exposé (reversing mid-glide); up from App Exposé glides
   back. Repeating a view's own swipe leaves it open.
