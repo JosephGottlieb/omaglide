@@ -17,6 +17,21 @@ const client = (address, history, extra = {}) => ({
     workspace: { id: 1, name: "1" }, ...extra
 });
 
+test("search matches all words across title, app and workspace without mutation", () => {
+    const entries = [
+        {key: "a", title: "Café report", cls: "Chromium", workspaceName: "Work", workspaceId: 2},
+        {key: "b", title: "Notes", cls: "Ghostty", workspaceName: "Home", workspaceId: 3},
+        {key: "c", title: "Workspace 4", windows: [{title: "Quarterly report", cls: "LibreOffice"}]}
+    ];
+    const before = JSON.stringify(entries);
+    assert.deepEqual(plain(logic.filterEntries(entries, " CHROM cafe ")).map(x => x.key), ["a"]);
+    assert.deepEqual(plain(logic.filterEntries(entries, "report libre")).map(x => x.key), ["c"]);
+    assert.deepEqual(plain(logic.filterEntries(entries, "3")).map(x => x.key), ["b"]);
+    assert.equal(logic.filterEntries(entries, "[unmatched]").length, 0);
+    assert.equal(logic.filterEntries(entries, " ").length, 3);
+    assert.equal(JSON.stringify(entries), before);
+});
+
 test("clamp bounds values and falls back safely for corrupted settings", () => {
     for (const invalid of [undefined, null, NaN, Infinity, -Infinity, "", "oops", {}, true]) {
         assert.equal(logic.clamp(invalid, 240, 1200, 560), 560);

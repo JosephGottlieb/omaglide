@@ -17,6 +17,7 @@ import time
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("runtime")
+parser.add_argument("--keyboard-only", action="store_true", help="Run held-key checks without mouse-drag checks")
 parser.add_argument("--carousel-source", type=Path, help="Explicit pre-fix Carousel snapshot for regression proof")
 parser.add_argument("--preview", type=Path, help="Save a screenshot of synthetic windows only (requires grim)")
 args = parser.parse_args()
@@ -32,7 +33,7 @@ runtime = compositor.runtime
 fixture = runtime.parent / "shell.qml"
 if fixture.exists():
     raise RuntimeError("Refusing to overwrite an existing test fixture")
-for name in ("Carousel.qml", "WorkspacePreview.qml", "logic.js", "workspace.js", "shortcuts.js"):
+for name in ("Carousel.qml", "SettingsPanel.qml", "WorkspacePreview.qml", "logic.js", "workspace.js", "shortcuts.js"):
     shutil.copy2(source / name, runtime.parent / name)
 if args.carousel_source:
     shutil.copy2(args.carousel_source, runtime.parent / "Carousel.qml")
@@ -142,13 +143,13 @@ def drag_case(with_super):
                                     env=environment, text=True, capture_output=True, timeout=3).stdout
         check("true" in held_state, "real Super key is held before resize", held_state.strip())
     try:
-        ipc("omaglide", "show")
+        ipc("omaglide", "windows")
         wait(lambda s: s["open"])
         time.sleep(.3)
         preview = status()["preview"]
         width = preview["tileWidth"]
         x = round(preview["width"] / 2 + width / 2 - 22)
-        y = round(preview["height"] / 2 + (width * .625 + 54) / 2 - 22)
+        y = round(preview["carouselY"] + preview["cardHeight"] - 22)
         before = geometry()
         compositor.verify_peer()
         motion = subprocess.Popen([str(pointer), "--width", "1440", "--height", "900",
@@ -199,49 +200,51 @@ try:
     command = "env OMADESKTOP_TEST_RUNTIME=" + shlex.quote(str(runtime)) + " quickshell -p " + shlex.quote(str(fixture))
     dispatch("hl.dsp.exec_cmd(" + json.dumps(command) + ")")
     wait(lambda s: s["synthetic"], getter=fixture_status)
+    compositor.ctl("eval", 'hl.bind("ALT_L", hl.dsp.global("omaglide-isolated-test:release"), {release=true,dont_inhibit=true,non_consuming=true,ignore_mods=true,transparent=true}); hl.bind("ALT_R", hl.dsp.global("omaglide-isolated-test:release"), {release=true,dont_inhibit=true,non_consuming=true,ignore_mods=true,transparent=true})')
     wait(lambda c: len(c) == 3, getter=clients)
-    for expression in [
-        'hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), {mouse=true})',
-        'hl.bind("SUPER + mouse:273", hl.dsp.window.resize(), {mouse=true})',
-    ]:
-        response = compositor.ctl("eval", expression)
-        if "error" in response.lower():
-            raise RuntimeError(response)
-    bindings = json.loads(compositor.ctl("-j", "binds"))
-    check(len([b for b in bindings if b.get("key") in ("mouse:272", "mouse:273") and b.get("modmask") == 64]) == 2,
-          "production-equivalent Super mouse move/resize bindings installed", bindings)
-    plain = drag_case(False)
-    check(plain["everResizing"] and plain["endTileWidth"] >= 878 and not plain["underlyingWindowsChanged"],
-          "unmodified drag resizes tile without moving app underneath", plain)
-    modified = drag_case(True)
-    check(modified["everResizing"] and modified["endTileWidth"] >= 878 and not modified["underlyingWindowsChanged"],
-          "Super-held drag resizes tile without moving app underneath", modified)
-    check(modified["shortcutsInhibited"], "compositor shortcut inhibitor is active during overlay")
-    key(1)
-    wait(lambda s: not s["open"])
-    old_keys = fixture_status()["appKeys"]
-    key(30)
-    wait(lambda f: f["appKeys"] > old_keys, getter=fixture_status)
-    check(True, "Escape returns keyboard input to underlying app")
-    # The surface-scoped inhibitor must not permanently disable normal desktop
-    # Super+drag once the overlay is closed.
-    target = next(c for c in clients() if c["floating"])
-    dispatch("hl.dsp.focus({window=" + json.dumps("address:" + target["address"]) + "})")
-    before = geometry()
-    compositor.verify_peer()
-    held = subprocess.Popen([str(chord_keyboard), "hold-super:2200"], env=environment,
-                            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    try:
-        time.sleep(.15)
-        run([str(pointer), "--width", "1440", "--height", "900", "move:400:300", "pause:100",
-             "down", "pause:100", "move:480:340", "pause:150", "up", "pause:100"])
-        after = geometry()
-        check(after[target["address"]]["at"] != before[target["address"]]["at"],
-              "normal Super+mouse move binding works again after Escape", {"before": before, "after": after})
-    finally:
-        output, error = held.communicate(timeout=4)
-        if held.returncode:
-            raise RuntimeError(error or output)
+    if not args.keyboard_only:
+        for expression in [
+            'hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), {mouse=true})',
+            'hl.bind("SUPER + mouse:273", hl.dsp.window.resize(), {mouse=true})',
+        ]:
+            response = compositor.ctl("eval", expression)
+            if "error" in response.lower():
+                raise RuntimeError(response)
+        bindings = json.loads(compositor.ctl("-j", "binds"))
+        check(len([b for b in bindings if b.get("key") in ("mouse:272", "mouse:273") and b.get("modmask") == 64]) == 2,
+              "production-equivalent Super mouse move/resize bindings installed", bindings)
+        plain = drag_case(False)
+        check(plain["everResizing"] and plain["endTileWidth"] >= 878 and not plain["underlyingWindowsChanged"],
+              "unmodified drag resizes tile without moving app underneath", plain)
+        modified = drag_case(True)
+        check(modified["everResizing"] and modified["endTileWidth"] >= 878 and not modified["underlyingWindowsChanged"],
+              "Super-held drag resizes tile without moving app underneath", modified)
+        check(modified["shortcutsInhibited"], "compositor shortcut inhibitor is active during overlay")
+        key(1)
+        wait(lambda s: not s["open"])
+        old_keys = fixture_status()["appKeys"]
+        key(30)
+        wait(lambda f: f["appKeys"] > old_keys, getter=fixture_status)
+        check(True, "Escape returns keyboard input to underlying app")
+        # The surface-scoped inhibitor must not permanently disable normal desktop
+        # Super+drag once the overlay is closed.
+        target = next(c for c in clients() if c["floating"])
+        dispatch("hl.dsp.focus({window=" + json.dumps("address:" + target["address"]) + "})")
+        before = geometry()
+        compositor.verify_peer()
+        held = subprocess.Popen([str(chord_keyboard), "hold-super:2200"], env=environment,
+                                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            time.sleep(.15)
+            run([str(pointer), "--width", "1440", "--height", "900", "move:400:300", "pause:100",
+                 "down", "pause:100", "move:480:340", "pause:150", "up", "pause:100"])
+            after = geometry()
+            check(after[target["address"]]["at"] != before[target["address"]]["at"],
+                  "normal Super+mouse move binding works again after Escape", {"before": before, "after": after})
+        finally:
+            output, error = held.communicate(timeout=4)
+            if held.returncode:
+                raise RuntimeError(error or output)
     result = compositor.ctl("eval", 'hl.bind("ALT + W", hl.dsp.global("omaglide-isolated-test:workspaces"))')
     if "error" in result.lower():
         raise RuntimeError(result)
@@ -250,14 +253,20 @@ try:
                              text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         chord_open = wait(lambda s: s["open"] and s["mode"] == "workspaces", timeout=2)
-        check(chord_open["holdMode"], "Alt+W opens workspace mode after resize")
+        check(chord_open["holdMode"], "Alt+W opens workspace mode")
     finally:
         output, error = chord.communicate(timeout=4)
         if chord.returncode:
             raise RuntimeError(error or output)
     wait(lambda s: not s["open"])
     check(True, "Alt release closes workspace mode with inhibitor enabled")
-    # Test the public interaction, not just a direct workspace shortcut.
+    # Alt+Tab opens the held carousel; W remains a compatible workspace
+    # shortcut. Backtick switching and persistent Exposé have dedicated
+    # multi-workspace integration coverage in run-workspace-checks.py.
+    ipc("omaglide", "windows")
+    wait(lambda s: s["open"] and s["mode"] == "windows")
+    ipc("omaglide", "hide")
+    wait(lambda s: not s["open"])
     compositor.ctl("eval", 'hl.bind("ALT + TAB", hl.dsp.global("omaglide-isolated-test:next"), {description="OmaGlide windows"})')
     compositor.verify_peer()
     chord = subprocess.Popen([str(chord_keyboard), "alt-workspaces"], env=environment,
@@ -271,13 +280,16 @@ try:
             raise RuntimeError(error or output)
     wait(lambda s: not s["open"])
     check(True, "Alt+Tab then W while Alt stays held switches modes; Alt release selects")
-    ipc("omaglide", "show")
-    wait(lambda s: "Windows: Alt+Tab" in s.get("shortcutText", ""))
+    ipc("omaglide", "windows")
+    wait(lambda s: "Switch: Alt+Tab" in s.get("shortcutText", ""))
     compositor.ctl("eval", 'hl.unbind("ALT + TAB"); hl.bind("ALT + SPACE", hl.dsp.global("omaglide-isolated-test:next"), {description="OmaGlide windows"})')
-    updated = wait(lambda s: "Windows: Alt+Space" in s.get("shortcutText", "") and "Alt+Tab" not in s.get("shortcutText", ""))
-    check(True, "footer tracks live rebinds without restarting", updated["shortcutText"])
+    # Binds are re-read on each opening (no polling while open).
+    ipc("omaglide", "hide"); wait(lambda s: not s["open"]); ipc("omaglide", "windows")
+    updated = wait(lambda s: "Switch: Alt+Space" in s.get("shortcutText", "") and "Alt+Tab" not in s.get("shortcutText", ""))
+    check(True, "footer reflects rebinds on the next opening without restarting", updated["shortcutText"])
     compositor.ctl("eval", 'hl.unbind("ALT + SPACE"); hl.bind("ALT + TAB", hl.dsp.global("omaglide-isolated-test:next"), {description="OmaGlide windows"})')
-    wait(lambda s: "Windows: Alt+Tab" in s.get("shortcutText", ""))
+    ipc("omaglide", "hide"); wait(lambda s: not s["open"]); ipc("omaglide", "windows")
+    wait(lambda s: "Switch: Alt+Tab" in s.get("shortcutText", ""))
     if args.preview:
         if args.preview.exists():
             raise RuntimeError("Refusing to overwrite a preview file")

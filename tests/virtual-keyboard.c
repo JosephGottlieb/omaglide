@@ -159,9 +159,11 @@ static void key(unsigned evdev, bool pressed) {
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "--help")) {
         puts("Test-only: virtual-keyboard key:EVDEV super:WORKSPACE shift-key:EVDEV super-key:EVDEV\n"
-             "Also alt-key:EVDEV, alt-workspaces (Tab then W with Alt held),\n"
+             "Also alt-key:EVDEV, alt-shift-key:EVDEV, alt-workspaces (Tab then W with Alt held),\n"
+             "alt-grave-cycle (backtick, forward, Shift+backtick, W with Alt held),\n"
+             "alt-tab-grave, alt-tab-grave-roundtrip, alt-tab-digit, alt-expose-cycle, quick-alt-tab (release during entrance),\n"
              "super-ctrl-key:EVDEV (holds 1500ms), super-shift-key:EVDEV, super-alt-key:EVDEV.\n"
-             "Also shift:MS (hold Shift), pause:MS.\n"
+             "Also ctrl-key:EVDEV, alt-search, shift:MS (hold Shift), pause:MS.\n"
              "Or --keep-alive SECONDS (1..90): keep an unmodified keyboard without sending keys.\n"
              "Full standard US keymap; key:1=Escape, key:15=Tab, super:2=Super+2.\n"
              "Requires matching XDG_RUNTIME_DIR/OMADESKTOP_TEST_RUNTIME and isolated test socket.");
@@ -185,6 +187,10 @@ int main(int argc, char **argv) {
             event.modifiers = SUPER;
         } else if (!strncmp(arg, "shift-key:", 10)) {
             event.key = number(arg + 10, 255); event.modifiers = SHIFT;
+        } else if (!strncmp(arg, "ctrl-key:", 9)) {
+            event.key = number(arg + 9, 255); event.modifiers = CTRL;
+        } else if (!strcmp(arg, "alt-search")) {
+            event.key = KEY_GRAVE; event.modifiers = ALT; event.wait = 1500;
         } else if (!strncmp(arg, "super-key:", 10)) {
             event.key = number(arg + 10, 255); event.modifiers = SUPER;
         } else if (!strncmp(arg, "super-shift-key:", 16)) {
@@ -195,8 +201,20 @@ int main(int argc, char **argv) {
             event.key = number(arg + 15, 255); event.modifiers = SUPER | CTRL; event.wait = 1500;
         } else if (!strncmp(arg, "alt-key:", 8)) {
             event.key = number(arg + 8, 255); event.modifiers = ALT; event.wait = 1500;
+        } else if (!strncmp(arg, "alt-shift-key:", 14)) {
+            event.key = number(arg + 14, 255); event.modifiers = ALT | SHIFT; event.wait = 1500;
+        } else if (!strcmp(arg, "alt-grave-cycle")) {
+            event.key = KEY_GRAVE; event.modifiers = ALT; event.wait = 1500;
+        } else if (!strcmp(arg, "alt-expose-cycle")) {
+            event.key = KEY_GRAVE; event.modifiers = ALT; event.wait = 900;
         } else if (!strcmp(arg, "alt-workspaces")) {
             event.key = KEY_TAB; event.modifiers = ALT; event.wait = 1500;
+        } else if (!strcmp(arg, "alt-tab-grave") || !strcmp(arg, "alt-tab-grave-roundtrip")) {
+            event.key = KEY_TAB; event.modifiers = ALT; event.wait = 1000;
+        } else if (!strcmp(arg, "alt-tab-digit")) {
+            event.key = KEY_TAB; event.modifiers = ALT; event.wait = 900;
+        } else if (!strcmp(arg, "quick-alt-tab")) {
+            event.key = KEY_TAB; event.modifiers = ALT; event.wait = 30;
         } else if (!strncmp(arg, "hold-super:", 11)) {
             event.wait = number(arg + 11, 10000); event.hold = true; event.modifiers = SUPER;
         } else if (!strncmp(arg, "shift:", 6)) {
@@ -255,6 +273,30 @@ int main(int argc, char **argv) {
         if (event.key) { key(event.key, true); wait_ms(25); key(event.key, false); }
         if (!strcmp(argv[i + 1], "alt-workspaces")) {
             wait_ms(500); key(KEY_W, true); wait_ms(25); key(KEY_W, false);
+        }
+        if (!strcmp(argv[i + 1], "alt-tab-grave") || !strcmp(argv[i + 1], "alt-tab-grave-roundtrip")) {
+            wait_ms(600); key(KEY_GRAVE, true); wait_ms(25); key(KEY_GRAVE, false);
+            if (!strcmp(argv[i + 1], "alt-tab-grave-roundtrip")) {
+                wait_ms(600); key(KEY_GRAVE, true); wait_ms(25); key(KEY_GRAVE, false);
+            }
+        }
+        if (!strcmp(argv[i + 1], "alt-tab-digit")) {
+            wait_ms(650); key(KEY_2, true); wait_ms(25); key(KEY_2, false);
+        }
+        if (!strcmp(argv[i + 1], "alt-grave-cycle")) {
+            wait_ms(600); key(KEY_GRAVE, true); wait_ms(25); key(KEY_GRAVE, false);
+            wait_ms(600); key(KEY_LEFTSHIFT, true);
+            key(KEY_GRAVE, true); wait_ms(25); key(KEY_GRAVE, false); key(KEY_LEFTSHIFT, false);
+            wait_ms(600); key(KEY_W, true); wait_ms(25); key(KEY_W, false);
+        }
+        if (!strcmp(argv[i + 1], "alt-expose-cycle")) {
+            /* Keep Alt physically held across two more presses. Each pause
+             * lets the parent test inspect the resulting selected card. */
+            wait_ms(650); key(KEY_GRAVE, true); wait_ms(25); key(KEY_GRAVE, false);
+            wait_ms(650); key(KEY_GRAVE, true); wait_ms(25); key(KEY_GRAVE, false);
+        }
+        if (!strcmp(argv[i + 1], "alt-search")) {
+            wait_ms(600); key(KEY_A, true); wait_ms(25); key(KEY_A, false);
         }
         if (event.wait) wait_ms(event.wait);
         if (event.modifiers & ALT) key(KEY_LEFTALT, false);

@@ -11,7 +11,9 @@ Item {
     property var handles: ({})
     property bool selected: false
     property bool opened: false
+    property bool retainFrames: false
     property real dpr: 1
+    property int refreshInterval: 450
 
     readonly property var windows: root.entry && Array.isArray(root.entry.windows) ? root.entry.windows : []
     readonly property var viewport: root.validRect(root.entry ? root.entry.viewport : null)
@@ -125,7 +127,14 @@ Item {
                 Loader {
                     id: captureLoader
                     anchors.fill: parent
-                    active: root.opened && !!tile.handle && tile.width > 0 && tile.height > 0
+                    property var requestedHandle: tile.handle
+                    property var mountedHandle: null
+                    onRequestedHandleChanged: {
+                        mountedHandle = null
+                        Qt.callLater(() => { mountedHandle = requestedHandle })
+                    }
+                    active: (root.opened || root.retainFrames) && !!requestedHandle && mountedHandle === requestedHandle
+                        && tile.width > 0 && tile.height > 0
                     sourceComponent: Component {
                         Item {
                             readonly property size sourceSize: preview.sourceSize
@@ -135,7 +144,7 @@ Item {
 
                             ScreencopyView {
                                 id: preview
-                                captureSource: tile.handle
+                                captureSource: captureLoader.mountedHandle
                                 live: root.opened && root.selected
                                 paintCursor: false
                                 visible: hasContent
@@ -147,10 +156,17 @@ Item {
                                 height: width / sourceRatio
                                 anchors.centerIn: parent
 
+                                Connections {
+                                    target: root
+                                    function onOpenedChanged() {
+                                        if (root.opened && !root.selected && preview.hasContent)
+                                            preview.captureFrame()
+                                    }
+                                }
                                 Timer {
-                                    interval: 450
+                                    interval: Math.max(1, root.refreshInterval)
                                     repeat: true
-                                    running: root.opened && !root.selected && preview.hasContent
+                                    running: root.opened && !root.selected && preview.hasContent && root.refreshInterval > 0
                                     onTriggered: preview.captureFrame()
                                 }
                             }
