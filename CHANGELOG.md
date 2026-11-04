@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Swipes follow the fingers. Exposé opens as soon as Hyprland recognises the
+  swipe and tracks it in real time, instead of waiting for the fingers to lift;
+  releasing finishes or springs back from wherever they stopped. Sessions
+  holding the older one-shot swipes reload into tracked ones automatically.
+- Fix: choosing a window on another workspace in Exposé glided the old
+  workspace's windows home and only showed the chosen one on the last frame.
+  Its workspace now switches in as the glide starts, its windows land on
+  themselves, the chosen window glides above the rest, and the others fade.
+- The selection's zoom grows and shrinks with the glide instead of jumping.
+
 - Liquid glass everywhere: the search bar, gear, header and title pills,
   slider caption strips, filmstrip, Quick Look labels, hints, Settings and
   workspace previews share one smoked-glass surface (GlassPanel) with light

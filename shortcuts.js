@@ -232,9 +232,15 @@ function blurLua(appId, enabled, fresh) {
 // and Hyprland suppresses gestures under that inhibitor too, so the
 // swipes that leave Exposé need disable_inhibit. The "+ni" revision marker
 // makes sessions still holding the older swipes reload into these.
+// The swipes are tracked: Hyprland calls start, update and end while the
+// fingers move, and each call is forwarded as a custom socket event,
+// "<appId>:swipe:<direction>:<phase>:<progress>", where progress is the
+// distance travelled in the swipe's direction over Hyprland's own
+// workspace_swipe_distance. A "+t" marker on the registration makes an older
+// one-shot registration reload into this one.
 function gestureLua(appId, enabled, fingers) {
     const count = Number(fingers) === 4 ? 4 : 3;
-    const want = enabled ? count + "+ni" : "off";
+    const want = enabled ? count + "+ni+t" : "off";
     const lines = [
         "local want = " + luaString(want),
         "local have = _G.omaglide_gestures or \"off\"",
@@ -242,12 +248,49 @@ function gestureLua(appId, enabled, fingers) {
         "if have ~= \"off\" then return \"reload\" end",
         "_G.omaglide_gestures = want"
     ];
-    if (enabled) for (const direction of ["up", "down"])
-        lines.push("hl.gesture({ fingers = " + count + ", direction = " + luaString(direction)
-            + ", disable_inhibit = true, action = function() hl.dispatch(hl.dsp.global("
-            + luaString(appId + ":gesture-" + direction) + ")) end })");
+    if (enabled) {
+        lines.push(
+            "local function omaglide_swipe(direction, sign)",
+            "  local travelled = 0",
+            "  local function distance()",
+            "    local ok, value = pcall(hl.get_config, \"gestures.workspace_swipe_distance\")",
+            "    value = ok and tonumber(value) or nil",
+            "    return value and value > 0 and value or 300",
+            "  end",
+            "  local function emit(phase)",
+            "    hl.dispatch(hl.dsp.event(" + luaString(appId + ":swipe:") + " .. direction .. \":\" .. phase .. \":\"",
+            "      .. string.format(\"%.4f\", travelled / distance())))",
+            "  end",
+            "  local function moved(event)",
+            "    local delta = type(event) == \"table\" and event.delta or nil",
+            "    local y = type(delta) == \"table\" and tonumber(delta.y or delta[2]) or 0",
+            "    travelled = travelled + sign * (y or 0)",
+            "  end",
+            "  return {",
+            "    start = function(event) travelled = 0; moved(event); emit(\"start\") end,",
+            "    update = function(event) moved(event); emit(\"update\") end,",
+            "    [\"end\"] = function() emit(\"end\") end,",
+            "  }",
+            "end");
+        // libinput reports upward motion as negative y.
+        for (const [direction, sign] of [["up", -1], ["down", 1]])
+            lines.push("hl.gesture({ fingers = " + count + ", direction = " + luaString(direction)
+                + ", disable_inhibit = true, action = omaglide_swipe(" + luaString(direction) + ", " + sign + ") })");
+    }
     lines.push("return \"registered\"");
     return lines.join("\n");
+}
+
+// Parses a tracked swipe event's data (see gestureLua); null for other events.
+function parseSwipeEvent(appId, data) {
+    const prefix = appId + ":swipe:";
+    const text = String(data || "");
+    if (text.indexOf(prefix) !== 0) return null;
+    const parts = text.slice(prefix.length).split(":");
+    const progress = Number(parts[2]);
+    if (parts.length !== 3 || ["up", "down"].indexOf(parts[0]) < 0
+        || ["start", "update", "end"].indexOf(parts[1]) < 0 || !isFinite(progress)) return null;
+    return { direction: parts[0], phase: parts[1], progress: progress };
 }
 
 // Hyprland reports a gesture that an earlier one shadows only as a config
