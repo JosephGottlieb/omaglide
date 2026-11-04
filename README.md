@@ -75,6 +75,9 @@ follows your fingers: Hyprland's gesture callbacks stream each swipe's progress
 (measured against `gestures:workspace_swipe_distance`) to OmaGlide as custom
 events, and letting go finishes the move if you went at least 30% of the way
 or flicked, or springs back otherwise.
+Swipes only ever return to the workspace Exposé opened over; moving to another
+workspace's window takes a click or a key press. Clicks during a swipe (for
+example from three-finger drag as the fingers land) are ignored.
 Settings turns gestures off or switches them to four fingers
 (`gesturesEnabled`, `gestureFingers`).
 

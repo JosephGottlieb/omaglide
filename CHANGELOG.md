@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Swipes only ever leave Exposé for the workspace it opened over; switching
+  workspaces takes a key press or a click. If the workspace changed underneath
+  while Exposé was open, the exit swipe brings the original one back.
+- Fix: with three-finger drag on, fingers landing unevenly could click the
+  highlighted tile just before a swipe, so the swipe seemed not to work and
+  the click switched workspaces. A click within a moment of a swipe starting
+  is now undone and the swipe proceeds; clicks during a swipe, or just after
+  it, are ignored.
+
 - Fix: letting go mid-swipe could leave Exposé frozen part-way. Hyprland's
   gesture parser only reads a release callback named `finish` (a field named
   `end` is silently ignored), so the release never reached OmaGlide; it now

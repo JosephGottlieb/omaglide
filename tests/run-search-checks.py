@@ -450,9 +450,74 @@ try:
     check(all(t["opacity"] < 1 for t in others), "windows left behind fade instead of gliding to the old workspace")
     wait(lambda s: not s["open"])
     wait(lambda c: any(x["address"] == away["address"] and x.get("focusHistoryID") == 0 for x in c), getter=clients)
-    dispatch("hl.dsp.window.move({workspace=\"1\",window=" + json.dumps("address:" + away["address"]) + ",follow=true})")
-    wait(lambda w: w.get("id") == 1, getter=lambda: json.loads(compositor.ctl("-j", "activeworkspace")))
     check(True, "the chosen window is focused once Exposé unmaps")
+    # Swipes only ever leave for the workspace Exposé opened over.
+    home = next(c for c in clients() if c["address"] != away["address"])
+    home_ws = home["workspace"]["id"]
+    def active_workspace():
+        return json.loads(compositor.ctl("-j", "activeworkspace"))["id"]
+    def focus_home():
+        time.sleep(.4)  # Let a previous exit's deferred focus land first.
+        dispatch("hl.dsp.focus({window=" + json.dumps("address:" + home["address"]) + "})")
+        wait(lambda c: any(x["address"] == home["address"] and x.get("focusHistoryID") == 0 for x in c), getter=clients)
+        wait(lambda w: w == home_ws, getter=active_workspace)
+    def landed_home():
+        trail = []
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            st = status()
+            trail.append((st["open"], st["closing"], st["tracking"], round(st["entranceProgress"], 2), active_workspace()))
+            if not st["open"]: break
+            time.sleep(.05)
+        time.sleep(.4)
+        focused = next(c for c in clients() if c.get("focusHistoryID") == 0)
+        global landing
+        landing = {"trail": trail[-8:], "workspace": active_workspace(), "home": home_ws,
+                   "focused": focused["address"], "want": home["address"]}
+        # Hyprland then focuses whatever is under the pointer (follow_mouse),
+        # so only the workspace is OmaGlide's to keep.
+        return not trail[-1][0] and active_workspace() == home_ws and all(w == home_ws for *_, w in trail)
+    def open_on_away():
+        ipc("omaglide", "expose")
+        state = wait(lambda s: s["exposed"] and s["entranceProgress"] == 1 and s["preview"]["shortcutsInhibited"])
+        i = next(n for n, t in enumerate(state["preview"]["tiles"]) if t["address"] == away["address"])
+        t = state["preview"]["tiles"][i]
+        cx, cy = int(t["x"] + t["width"] / 2), int(t["y"] + t["height"] / 2)
+        run([str(pointer), "--width", "1440", "--height", "900", f"move:{cx-10}:{cy}", "pause:100", f"move:{cx+10}:{cy}"])
+        wait(lambda s: s["selected"] == i and not s["closing"])
+        return cx + 10, cy
+    def swipe_out():
+        swipe_event("down", "start", 0)
+        swipe_event("down", "update", .6)
+        swipe_event("down", "end", .6)
+    focus_home()
+    open_on_away()
+    swipe_out()
+    check(landed_home(), "with another workspace's window highlighted, the first swipe down exits to the original workspace", landing)
+    focus_home()
+    cx, cy = open_on_away()
+    run([str(pointer), "--width", "1440", "--height", "900", f"move:{cx}:{cy}", "down", "up"])
+    wait(lambda s: s["closing"], timeout=2)
+    swipe_out()  # the click was the fingers landing
+    check(landed_home(), "a click just before a swipe is undone; the swipe still exits to the original workspace", landing)
+    focus_home()
+    swipe_event("up", "start", 0)
+    swipe_event("up", "update", .5)
+    tracked = wait(lambda s: s["open"] and s["tracking"] == "open" and s["preview"]["tiles"])
+    t = tracked["preview"]["tiles"][0]
+    run([str(pointer), "--width", "1440", "--height", "900",
+         f"move:{int(t['x'] + t['width'] / 2)}:{int(t['y'] + t['height'] / 2)}", "down", "up"])
+    time.sleep(.3)
+    check(status()["open"] and not status()["closing"] and status()["tracking"] == "open",
+          "clicks while a swipe is moving do not activate a window")
+    swipe_event("up", "end", .5)
+    wait(lambda s: s["open"] and s["entranceProgress"] == 1 and not s["tracking"])
+    dispatch('hl.dsp.focus({workspace="4"})')
+    wait(lambda w: w == 4, getter=active_workspace)
+    swipe_out()
+    check(landed_home(), "a swipe exit returns to the original workspace even if it changed underneath", landing)
+    dispatch("hl.dsp.window.move({workspace=" + json.dumps(str(home_ws)) + ",window=" + json.dumps("address:" + away["address"]) + ",follow=true})")
+    wait(lambda w: w.get("id") == home_ws, getter=lambda: json.loads(compositor.ctl("-j", "activeworkspace")))
     ipc("omaglide", "sliderStyle", "icons")
     ipc("omaglide", "windows")
     icons = wait(lambda s: s["open"] and s["iconStyle"] and s["preview"]["iconSwitcher"]["visible"]

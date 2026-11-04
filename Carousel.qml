@@ -72,6 +72,25 @@ Item {
         trackProgress = 0
         trackVelocity = 0
         trackStamp = Date.now()
+        swipeQuietUntil = trackStamp + 400
+        // Fingers landing unevenly (with three-finger drag on) can click the
+        // highlighted tile just before the swipe is recognised. That click was
+        // the swipe: undo it and leave for the desktop Exposé opened over.
+        if (closing && closingEntry && trackStamp - clickedAt < 350) {
+            closingEntry = null
+            returnToOrigin(true)
+            exitAnimation.stop()
+            if (direction === "up" ? !appExposed : appExposed) {
+                // The view's own opening swipe: it stays open.
+                closing = false
+                glideDuration = Math.max(80, Math.round(exposeDuration * (1 - entranceProgress)))
+                entrance.restart()
+                return
+            }
+            trackBase = entranceProgress
+            tracking = "close"
+            return
+        }
         const showing = (open || opening) && exposed && !closing
         if (direction === "up" ? showing && !appExposed : showing && appExposed) return // Already there.
         if (!showing && (open || opening) && !closing && !exposed) { close(false); return } // The slider.
@@ -85,6 +104,7 @@ Item {
             entrance.stop()
             trackBase = entranceProgress
             tracking = "close"
+            returnToOrigin(false)
             return
         }
         // Opening, or turning a glide back to the desktop around mid-way.
@@ -92,6 +112,28 @@ Item {
         exitAnimation.stop()
         tracking = "open"
         showExpose(direction === "down")
+    }
+    // Swipes only ever leave for where Exposé was opened; switching needs a
+    // deliberate key press or click. Clicks while a swipe moves, or just after
+    // it, come from the fingers on the touchpad and are ignored.
+    property real swipeQuietUntil: 0
+    property real clickedAt: 0
+    function clickActivate(index) {
+        const now = Date.now()
+        if (tracking || now < swipeQuietUntil) return
+        selectIndex(index)
+        clickedAt = now
+        close(true)
+    }
+    // Brings back the workspace (and window) Exposé opened over, when something
+    // else is showing; force also restores focus a cancelled click changed.
+    function returnToOrigin(force) {
+        const monitor = Hyprland.focusedMonitor
+        const current = monitor && monitor.activeWorkspace ? monitor.activeWorkspace.id : 0
+        if (originWorkspaceId <= 0 || (!force && current === originWorkspaceId)) return
+        const origin = rawWindows.find(w => w.address === originAddress && w.workspaceId === originWorkspaceId)
+        Hyprland.dispatch(origin ? 'hl.dsp.focus({ window = "address:' + origin.address + '" })'
+            : 'hl.dsp.focus({ workspace = "' + originWorkspaceId + '" })')
     }
     function swipeEvent(data) {
         const swipe = Shortcuts.parseSwipeEvent(shortAppId, data)
@@ -117,6 +159,7 @@ Item {
         swipeUpdate(progress)
         const kind = tracking
         tracking = ""
+        swipeQuietUntil = Date.now() + 400
         // Far enough, or quick enough toward the end: macOS commits both.
         const commit = trackProgress + Math.max(0, trackVelocity) * 0.12 >= 0.3
         if (kind === "open") {
@@ -216,6 +259,8 @@ Item {
     property var allWindows: []
     property var rawWindows: []
     property string activeAddress: ""
+    // The window focused when the view opened; refreshes keep activeAddress live.
+    property string originAddress: ""
     property bool groupApps: true
     readonly property bool groupingActive: groupApps && mode === "windows" && !exposed
     property var groupSelections: ({})
@@ -480,9 +525,9 @@ Item {
         const showing = (open || opening) && exposed && !closing
         if (direction === "up") {
             if (!showing) expose()
-            else if (appExposed) close(false)
+            else if (appExposed) { returnToOrigin(false); close(false) }
         } else if (showing) {
-            if (!appExposed) close(false)
+            if (!appExposed) { returnToOrigin(false); close(false) }
         } else if ((open || opening) && !closing && !exposed) close(false)
         else appExpose()
     }
@@ -753,6 +798,7 @@ Item {
         refreshHandles()
         const activeClient = clients.find(c => Number(c.focusHistoryID) === 0)
         activeAddress = activeClient ? activeClient.address : ""
+        if (!wasOpen) originAddress = activeAddress
         if (!wasOpen && appExposed)
             appExposeClass = activeClient ? Logic.appClassKey(activeClient.class || activeClient.initialClass) : ""
         if (mode === "windows") rawWindows = Logic.orderClients(clients).map(c => ({
@@ -1587,7 +1633,7 @@ Item {
                                 // only actual pointer movement changes selection.
                                 if (moved) root.selectIndex(card.index)
                             }
-                            onClicked: { root.selectIndex(card.index % root.windows.length); root.close(true) }
+                            onClicked: root.clickActivate(card.index % root.windows.length)
                             onWheel: wheel => {
                                 if (wheel.modifiers & Qt.ControlModifier) root.resizeBy(wheel.angleDelta.y > 0 ? 32 : -32)
                                 else root.step((wheel.angleDelta.y || wheel.angleDelta.x) > 0 ? -1 : 1)
@@ -1697,7 +1743,7 @@ Item {
                                         root.hoverPosition = point
                                         if (moved) { root.holdMode = false; root.selectIndex(iconItem.index) }
                                     }
-                                    onClicked: { root.selectIndex(iconItem.index); root.close(true) }
+                                    onClicked: root.clickActivate(iconItem.index)
                                     onWheel: wheel => {
                                         root.step((wheel.angleDelta.y || wheel.angleDelta.x) > 0 ? -1 : 1)
                                         wheel.accepted = true
@@ -1927,7 +1973,7 @@ Item {
                             MouseArea {
                                 id: overviewMouse
                                 anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                onClicked: { root.selectIndex(overviewItem.index); root.close(true) }
+                                onClicked: root.clickActivate(overviewItem.index)
                                 onWheel: wheel => {
                                     if (wheel.modifiers & Qt.ControlModifier) root.resizeBy(wheel.angleDelta.y > 0 ? 32 : -32)
                                     else root.step((wheel.angleDelta.y || wheel.angleDelta.x) > 0 ? -1 : 1)
