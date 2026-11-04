@@ -101,11 +101,13 @@ test('gesture Lua adds tracked swipes once and asks for a reload to change them'
     assert.equal((lua.match(/disable_inhibit = true/g) || []).length, 2);
     // Every phase streams progress as a custom event the shell can follow.
     assert.match(lua, /hl\.dsp\.event\("hjklcc\.omaglide:swipe:" \.\. direction/);
-    for (const phase of ['start = function', 'update = function', '["end"] = function'])
+    for (const phase of ['start = function', 'update = function', 'finish = function'])
         assert.ok(lua.includes(phase), phase);
+    // Hyprland never reads a callback named "end": the release would be lost.
+    assert.doesNotMatch(lua, /\["end"\]/);
     assert.match(lua, /gestures\.workspace_swipe_distance/);
-    // Older one-shot registrations ("3+ni") reload into tracked ones.
-    assert.match(lua, /local want = "3\+ni\+t"/);
+    // Older registrations ("3+ni", "3+ni+t") reload into this one.
+    assert.match(lua, /local want = "3\+ni\+f"/);
     assert.match(lua, /if have ~= "off" then return "reload" end/);
     assert.doesNotMatch(lua, /unset/);
     assert.match(shortcuts.gestureLua(id, true, 4), /fingers = 4/);
