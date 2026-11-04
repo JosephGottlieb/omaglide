@@ -93,13 +93,19 @@ test('recognizes App Exposé bindings separately from Exposé', () => {
         'Exposé: Alt+Backtick   ·   App Exposé: Super+Alt+Backtick');
     assert.match(shortcuts.bindingLua(id, {appExpose: 'SUPER + A'}, []), /hjklcc\.omaglide:appExpose/);
 });
-test('gesture Lua adds swipes once and asks for a reload to change them', () => {
+test('gesture Lua adds tracked swipes once and asks for a reload to change them', () => {
     const lua = shortcuts.gestureLua(id, true, 3);
-    assert.match(lua, /fingers = 3, direction = "up", disable_inhibit = true, action = function\(\) hl\.dispatch\(hl\.dsp\.global\("hjklcc\.omaglide:gesture-up"\)\)/);
-    assert.match(lua, /direction = "down"/);
+    assert.match(lua, /fingers = 3, direction = "up", disable_inhibit = true, action = omaglide_swipe\("up", -1\)/);
+    assert.match(lua, /direction = "down", disable_inhibit = true, action = omaglide_swipe\("down", 1\)/);
     // Exit swipes must still fire while OmaGlide's shortcut inhibitor is active.
     assert.equal((lua.match(/disable_inhibit = true/g) || []).length, 2);
-    assert.match(lua, /local want = "3\+ni"/);
+    // Every phase streams progress as a custom event the shell can follow.
+    assert.match(lua, /hl\.dsp\.event\("hjklcc\.omaglide:swipe:" \.\. direction/);
+    for (const phase of ['start = function', 'update = function', '["end"] = function'])
+        assert.ok(lua.includes(phase), phase);
+    assert.match(lua, /gestures\.workspace_swipe_distance/);
+    // Older one-shot registrations ("3+ni") reload into tracked ones.
+    assert.match(lua, /local want = "3\+ni\+t"/);
     assert.match(lua, /if have ~= "off" then return "reload" end/);
     assert.doesNotMatch(lua, /unset/);
     assert.match(shortcuts.gestureLua(id, true, 4), /fingers = 4/);
@@ -109,4 +115,11 @@ test('gesture Lua adds swipes once and asks for a reload to change them', () => 
     assert.doesNotMatch(off, /hl\.gesture/);
     assert.deepEqual(Array.from(shortcuts.gestureConflicts('x: Previous UP shadows new UP')), ['up']);
     assert.deepEqual(Array.from(shortcuts.gestureConflicts('')), []);
+});
+test('parses tracked swipe events for this plugin only', () => {
+    assert.deepEqual({...shortcuts.parseSwipeEvent(id, id + ':swipe:up:update:0.4200')},
+        {direction: 'up', phase: 'update', progress: 0.42});
+    assert.equal(shortcuts.parseSwipeEvent(id, 'other.plugin:swipe:up:update:0.4'), null);
+    assert.equal(shortcuts.parseSwipeEvent(id, id + ':swipe:left:update:0.4'), null);
+    assert.equal(shortcuts.parseSwipeEvent(id, id + ':swipe:up:start:nan'), null);
 });

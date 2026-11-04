@@ -70,9 +70,11 @@ By default a **three-finger swipe up** opens Exposé and a **three-finger swipe
 down** opens App Exposé, following Mission Control: swiping down in Exposé
 glides the windows back to their desktop positions, and swiping down again
 (even mid-glide) opens App Exposé; swiping up in App Exposé glides back to the
-desktop. Repeating a view's own opening swipe leaves it open. Hyprland reports
-a swipe only once it ends, so the animation plays after the swipe rather than
-following your fingers.
+desktop. Repeating a view's own opening swipe leaves it open. The animation
+follows your fingers: Hyprland's gesture callbacks stream each swipe's progress
+(measured against `gestures:workspace_swipe_distance`) to OmaGlide as custom
+events, and letting go finishes the move if you went at least 30% of the way
+or flicked, or springs back otherwise.
 Settings turns gestures off or switches them to four fingers
 (`gesturesEnabled`, `gestureFingers`).
 

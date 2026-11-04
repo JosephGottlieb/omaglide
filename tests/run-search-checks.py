@@ -382,6 +382,77 @@ try:
     wait(lambda s: s["open"] and s["exposed"] and s["appExposed"])
     ipc("omaglide", "swipe", "up"); wait(lambda s: not s["open"])
     check(True, "swipes follow Mission Control rules; App Exposé switches in place")
+    # Tracked swipes: Hyprland's callbacks arrive as custom socket events, and
+    # Exposé follows the fingers instead of waiting for them to lift.
+    def swipe_event(direction, phase, progress):
+        result = compositor.ctl("eval", 'hl.dispatch(hl.dsp.event("omaglide-isolated-test:swipe:%s:%s:%.4f"))'
+                                % (direction, phase, progress))
+        if "error" in result.lower():
+            raise RuntimeError(result)
+    swipe_event("up", "start", 0)
+    wait(lambda s: s["open"] and s["exposed"] and s["tracking"] == "open")
+    swipe_event("up", "update", .4)
+    held = wait(lambda s: abs(s["entranceProgress"] - .4) < .01)
+    time.sleep(.25)
+    check(abs(status()["entranceProgress"] - .4) < .01 and status()["tracking"] == "open",
+          "a swipe up holds Exposé exactly where the fingers are", held["entranceProgress"])
+    swipe_event("up", "update", .2)
+    wait(lambda s: abs(s["entranceProgress"] - .2) < .01)
+    check(True, "moving the fingers back pulls Exposé back with them")
+    time.sleep(.2)
+    swipe_event("up", "update", .5)
+    swipe_event("up", "end", .5)
+    wait(lambda s: s["open"] and not s["closing"] and s["entranceProgress"] == 1 and not s["tracking"])
+    check(True, "releasing past the threshold finishes opening from where the fingers stopped")
+    swipe_event("down", "start", 0)
+    swipe_event("down", "update", .5)
+    halfway = wait(lambda s: s["closing"] and abs(s["entranceProgress"] - .5) < .01)
+    check(halfway["open"] and halfway["tracking"] == "close", "swiping down drags Exposé back toward the desktop")
+    time.sleep(.3)
+    swipe_event("down", "update", .1)
+    time.sleep(.3)
+    swipe_event("down", "end", .1)
+    wait(lambda s: s["open"] and not s["closing"] and s["entranceProgress"] == 1)
+    check(True, "a short, slow swipe down springs Exposé back open")
+    swipe_event("down", "start", 0)
+    swipe_event("down", "update", .6)
+    swipe_event("down", "end", .6)
+    wait(lambda s: not s["open"])
+    check(True, "a long swipe down finishes the trip to the desktop")
+    swipe_event("up", "start", 0)
+    wait(lambda s: s["open"] and s["tracking"] == "open")
+    time.sleep(.3)
+    swipe_event("up", "update", .08)
+    time.sleep(.3)
+    swipe_event("up", "end", .08)
+    wait(lambda s: not s["open"])
+    check(True, "a short, slow swipe up lets Exposé fall back closed")
+    # Leaving to a window on another workspace glides onto that workspace.
+    away = sorted(clients(), key=lambda c: c["title"])[-1]
+    dispatch("hl.dsp.window.move({workspace=\"4\",window=" + json.dumps("address:" + away["address"]) + ",follow=false})")
+    wait(lambda c: any(x["address"] == away["address"] and x["workspace"]["id"] == 4 for x in c), getter=clients)
+    ipc("omaglide", "expose")
+    shown = wait(lambda s: s["exposed"] and s["entranceProgress"] == 1 and s["preview"]["shortcutsInhibited"])
+    index = next(i for i, t in enumerate(shown["preview"]["tiles"]) if t["address"] == away["address"])
+    tile = shown["preview"]["tiles"][index]
+    x, y = int(tile["x"] + tile["width"] / 2), int(tile["y"] + tile["height"] / 2)
+    run([str(pointer), "--width", "1440", "--height", "900", f"move:{x-10}:{y}", "pause:100", f"move:{x+10}:{y}"])
+    wait(lambda s: s["selected"] == index and not s["closing"])
+    key(28)  # Enter
+    leaving = wait(lambda s: s["closing"], timeout=2)
+    workspace_mid_glide = json.loads(compositor.ctl("-j", "activeworkspace"))["id"]
+    chosen = leaving["preview"]["tiles"][index]
+    check(leaving["desktopWorkspaceId"] == 4 and workspace_mid_glide == 4
+          and chosen["z"] > max(t["z"] for i, t in enumerate(leaving["preview"]["tiles"]) if i != index),
+          "leaving to another workspace's window switches there as the glide starts, chosen window on top",
+          {"desktop": leaving["desktopWorkspaceId"], "active": workspace_mid_glide, "z": chosen["z"]})
+    others = [t for i, t in enumerate(wait(lambda s: s["closing"] and s["entranceProgress"] < .5)["preview"]["tiles"]) if i != index]
+    check(all(t["opacity"] < 1 for t in others), "windows left behind fade instead of gliding to the old workspace")
+    wait(lambda s: not s["open"])
+    wait(lambda c: any(x["address"] == away["address"] and x.get("focusHistoryID") == 0 for x in c), getter=clients)
+    dispatch("hl.dsp.window.move({workspace=\"1\",window=" + json.dumps("address:" + away["address"]) + ",follow=true})")
+    wait(lambda w: w.get("id") == 1, getter=lambda: json.loads(compositor.ctl("-j", "activeworkspace")))
+    check(True, "the chosen window is focused once Exposé unmaps")
     ipc("omaglide", "sliderStyle", "icons")
     ipc("omaglide", "windows")
     icons = wait(lambda s: s["open"] and s["iconStyle"] and s["preview"]["iconSwitcher"]["visible"]

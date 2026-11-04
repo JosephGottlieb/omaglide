@@ -32,8 +32,12 @@ Item {
         target: root; property: "entranceProgress"
         // Exposé flies windows from their desktop positions; the carousel
         // keeps its quick 50ms slide.
-        to: 1; duration: root.exposed ? root.exposeDuration : root.entranceDuration; easing.type: Easing.OutCubic
+        to: 1; duration: root.exposed ? root.glideDuration : root.entranceDuration; easing.type: Easing.OutCubic
     }
+    // A released swipe finishes only the distance the fingers left, so
+    // these shrink with it; untracked opens and closes use the full length.
+    property int glideDuration: exposeDuration
+    property int exitDuration: 220
     // Leaving Exposé plays the fly-in backwards: windows on the desktop glide
     // back to where they really are and the rest fade, before the layer
     // unmaps. Input is ignored meanwhile; reopening either Exposé reverses it.
@@ -42,7 +46,7 @@ Item {
     NumberAnimation {
         id: exitAnimation
         target: root; property: "entranceProgress"
-        to: 0; duration: 220; easing.type: Easing.InOutCubic
+        to: 0; duration: root.exitDuration; easing.type: Easing.InOutCubic
         onFinished: if (root.closing) root.finishClose(root.closingEntry)
     }
     function cancelClosing() {
@@ -50,6 +54,90 @@ Item {
         exitAnimation.stop()
         closing = false
         closingEntry = null
+    }
+    // Swipes follow the fingers. Hyprland streams each gesture's progress
+    // (see Shortcuts.gestureLua); while one is "open" or "close" tracking,
+    // entranceProgress is the fingers' position instead of an animation, and
+    // releasing finishes or cancels from wherever they stopped.
+    property string tracking: ""
+    property real trackBase: 0
+    property real trackProgress: 0
+    property real trackVelocity: 0
+    property real trackStamp: 0
+    function trackedValue() {
+        return tracking === "close" ? trackBase * (1 - trackProgress) : trackBase + (1 - trackBase) * trackProgress
+    }
+    function swipeStart(direction) {
+        tracking = ""
+        trackProgress = 0
+        trackVelocity = 0
+        trackStamp = Date.now()
+        const showing = (open || opening) && exposed && !closing
+        if (direction === "up" ? showing && !appExposed : showing && appExposed) return // Already there.
+        if (!showing && (open || opening) && !closing && !exposed) { close(false); return } // The slider.
+        if (showing) {
+            // Exposé is on screen: the swipe takes it back to the desktop.
+            if (!open || opening) { close(false); return }
+            closing = true
+            closingEntry = null
+            quickLook = false
+            settingsOpen = false
+            entrance.stop()
+            trackBase = entranceProgress
+            tracking = "close"
+            return
+        }
+        // Opening, or turning a glide back to the desktop around mid-way.
+        trackBase = closing ? entranceProgress : 0
+        exitAnimation.stop()
+        tracking = "open"
+        showExpose(direction === "down")
+    }
+    function swipeEvent(data) {
+        const swipe = Shortcuts.parseSwipeEvent(shortAppId, data)
+        if (!swipe) return
+        if (swipe.phase === "start") swipeStart(swipe.direction)
+        if (swipe.phase === "end") swipeEnd(swipe.progress)
+        else swipeUpdate(swipe.progress)
+    }
+    function swipeUpdate(progress) {
+        if (!tracking) return
+        const now = Date.now(), value = Math.max(0, Math.min(1, progress))
+        const elapsed = Math.max(1, now - trackStamp)
+        // Smoothed progress per second, for flicks released early. Resting
+        // fingers send nothing, so after a pause only the latest motion counts.
+        const instant = (value - trackProgress) * 1000 / elapsed
+        trackVelocity = elapsed > 100 ? instant : 0.6 * trackVelocity + 0.4 * instant
+        trackStamp = now
+        trackProgress = value
+        if (open && !entrancePending) entranceProgress = trackedValue()
+    }
+    function swipeEnd(progress) {
+        if (!tracking) return
+        swipeUpdate(progress)
+        const kind = tracking
+        tracking = ""
+        // Far enough, or quick enough toward the end: macOS commits both.
+        const commit = trackProgress + Math.max(0, trackVelocity) * 0.12 >= 0.3
+        if (kind === "open") {
+            if (!commit) {
+                if (!open || opening || entrancePending) { finishClose(null); return }
+                closing = true
+                closingEntry = null
+                exitDuration = Math.max(80, Math.round(220 * entranceProgress))
+                exitAnimation.restart()
+            } else if (open && !entrancePending) {
+                glideDuration = Math.max(80, Math.round(exposeDuration * (1 - entranceProgress)))
+                entrance.restart()
+            } // Still mapping: the first frame starts the full glide.
+        } else if (commit) {
+            exitDuration = Math.max(80, Math.round(220 * entranceProgress))
+            exitAnimation.restart()
+        } else {
+            closing = false
+            glideDuration = Math.max(80, Math.round(exposeDuration * (1 - entranceProgress)))
+            entrance.restart()
+        }
     }
     property bool opening: false
     property bool holdMode: true
@@ -112,6 +200,11 @@ Item {
     }
     // Desktop workspace shown when Exposé opened: its windows fly into place.
     property int originWorkspaceId: 0
+    property int originMonitorId: -1
+    // The workspace Exposé glides back to: where the chosen window lives when
+    // leaving to it on this monitor, otherwise the one Exposé opened over.
+    readonly property int desktopWorkspaceId: closing && closingEntry && closingEntry.monitor === originMonitorId
+        && Number.isInteger(closingEntry.workspaceId) && closingEntry.workspaceId > 0 ? closingEntry.workspaceId : originWorkspaceId
     onExposedChanged: {
         quickLook = false
         if (!exposed) appExposed = false
@@ -364,6 +457,8 @@ Item {
     function showExpose(app) {
         const reversing = closing
         cancelClosing()
+        glideDuration = exposeDuration
+        exitDuration = 220
         const live = (open || opening) && mode === "windows"
         appExposed = !!app
         if (app && live) {
@@ -373,7 +468,8 @@ Item {
         if (exposed && live) rebuildEntries()
         exposed = true
         if (!live) openSwitcher(false, "windows", 0)
-        else if (reversing) entrance.restart() // Glide back out from where the exit stopped.
+        else if (reversing && tracking !== "open") entrance.restart() // Glide back out from where the exit stopped.
+        else if (reversing) entranceProgress = trackedValue()
         holdMode = false
     }
     // Mission Control swipes. Up opens Exposé; down from Exposé glides back
@@ -510,6 +606,7 @@ Item {
         errorMessage = ""
         refreshShortcuts()
         monitorName = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
+        originMonitorId = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.id : -1
         originWorkspaceId = Hyprland.focusedMonitor && Hyprland.focusedMonitor.activeWorkspace
             ? Hyprland.focusedMonitor.activeWorkspace.id : 0
         Hyprland.refreshToplevels()
@@ -542,6 +639,12 @@ Item {
         if (exposed && open && !opening && !immediate) {
             closing = true
             closingEntry = entry
+            tracking = ""
+            exitDuration = 220
+            // The chosen window's workspace slides in under the glide, so its
+            // windows land on themselves instead of popping in after unmapping.
+            if (entry && /^0x[0-9a-f]+$/i.test(entry.address))
+                Hyprland.dispatch('hl.dsp.focus({ window = "address:' + entry.address + '" })')
             quickLook = false
             settingsOpen = false
             entrance.stop()
@@ -553,6 +656,7 @@ Item {
     function finishClose(entry) {
         closing = false
         closingEntry = null
+        tracking = ""
         focusTimer.stop()
         pendingAddr = ""
         pendingWorkspace = ""
@@ -711,6 +815,7 @@ Item {
     Connections {
         target: Hyprland
         function onRawEvent(event) {
+            if (event.name === "custom") { root.swipeEvent(event.data); return }
             if (event.name === "configreloaded") root.applyBindings(true)
             if (["openwindow", "closewindow", "movewindow", "windowtitle", "movewindowv2", "createworkspace",
                 "destroyworkspace", "moveworkspace", "monitoradded", "monitorremoved", "changefloatingmode", "fullscreen"].indexOf(event.name) < 0) return
@@ -813,6 +918,11 @@ Item {
         function expose(): void { root.expose() }
         function appExpose(): void { root.appExpose() }
         function swipe(direction: string): void { root.swipe(direction) }
+        // A tracked swipe phase, as Hyprland's gesture callbacks send it:
+        // swipeTrack up start 0 / swipeTrack up update 0.4 / swipeTrack up end 0.6
+        function swipeTrack(direction: string, phase: string, progress: real): void {
+            root.swipeEvent(root.shortAppId + ":swipe:" + direction + ":" + phase + ":" + progress)
+        }
         // sliderStyle icons / sliderStyle thumbnails
         function sliderStyle(style: string): string {
             if (style !== "icons" && style !== "thumbnails") return "use icons or thumbnails"
@@ -851,7 +961,7 @@ Item {
             return JSON.stringify({ open: root.open, mode: root.mode, count: root.windows.length, selected: root.selected,
                 carouselMode: root.carouselMode,
                 accentColor: String(root.accentColor),
-                exposed: root.exposed, closing: root.closing, sliderStyle: root.sliderStyle, iconStyle: root.iconStyle, appExposed: root.appExposed, appExposeClass: root.appExposeClass,
+                exposed: root.exposed, closing: root.closing, tracking: root.tracking, desktopWorkspaceId: root.desktopWorkspaceId, sliderStyle: root.sliderStyle, iconStyle: root.iconStyle, appExposed: root.appExposed, appExposeClass: root.appExposeClass,
                 gestures: { enabled: root.gesturesEnabled, fingers: root.gestureFingers, status: root.gestureStatus,
                     conflicts: root.gestureConflicts },
                 settingsOpen: root.settingsOpen, quickLook: root.quickLook, searchQuery: root.searchQuery, totalCount: root.allWindows.length,
@@ -890,7 +1000,8 @@ Item {
                 function onFrameSwapped() {
                     if (root.open && root.entrancePending) {
                         root.entrancePending = false
-                        entrance.restart()
+                        if (root.tracking === "open") root.entranceProgress = root.trackedValue()
+                        else entrance.restart()
                     }
                 }
             }
@@ -936,7 +1047,7 @@ Item {
                         return {x: c.x, y: c.y, width: c.width, height: c.height, selected: c.isSelected,
                             frameColor: String(c.frameColor), frameWidth: c.frameWidth,
                             previewWidth: c.width, previewHeight: c.previewHeight, sourceAspectRatio: c.win.sourceAspectRatio,
-                            emphasis: c.geometry.emphasis, scale: c.scale}
+                            emphasis: c.geometry.emphasis, scale: c.scale, z: c.z, address: c.win.address, opacity: c.opacity}
                     }) : [],
                     overview: { visible: overviewStrip.visible, x: overviewStrip.x, y: overviewStrip.y,
                         width: overviewStrip.width, height: overviewStrip.height,
@@ -1204,8 +1315,8 @@ Item {
                         }
                         // Windows on the desktop being covered fly from where they
                         // really are, so opening reads as the desktop spreading out.
-                        readonly property var origin: root.exposed && win && win.at && win.size && root.originWorkspaceId !== 0
-                            && win.workspaceId === root.originWorkspaceId
+                        readonly property var origin: root.exposed && win && win.at && win.size && root.desktopWorkspaceId !== 0
+                            && win.workspaceId === root.desktopWorkspaceId
                             ? { x: win.at[0] - panel.screenX, y: win.at[1] - panel.screenY, width: win.size[0], height: win.size[1] } : null
                         readonly property bool flying: root.exposed && root.entranceProgress < 1
                         // Quick Look grows this very tile (same live capture) toward the
@@ -1236,7 +1347,9 @@ Item {
                         Behavior on y { enabled: card.glide; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                         Behavior on width { enabled: card.glide; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                         Behavior on height { enabled: card.glide; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                        z: looking ? 950 : isSelected ? 110 : 100 - Math.abs(distance)
+                        // The window being left to glides above the rest.
+                        readonly property bool chosen: root.closing && !!root.closingEntry && !!win && win.key === root.closingEntry.key
+                        z: looking ? 950 : chosen ? 940 : isSelected ? 110 : 100 - Math.abs(distance)
                         visible: nearViewport
                         // Off-desktop windows fade and settle in. Carousel neighbours are
                         // dimmed by an overlay, not opacity, so the desktop never shows through.
@@ -1245,7 +1358,7 @@ Item {
                         // grid allow: its title pill (inside the 50px caption, scaled too)
                         // must stay clear of the hints below and the search bar above.
                         readonly property real zoom: {
-                            if (!root.exposed || !isSelected || flying || target.width <= 0) return 1
+                            if (!root.exposed || !isSelected || target.width <= 0) return 1
                             const cx = target.x + target.width / 2, cy = target.y + target.height / 2
                             const halfW = target.width / 2, halfH = target.height / 2
                             const gridBottom = panel.gridTop + panel.gridHeight
@@ -1253,7 +1366,10 @@ Item {
                                 (cy - panel.gridTop + 16) / halfH, (gridBottom + 4 - cy) / (halfH + 50)))
                         }
                         // While looking, the hover zoom blends out so both ends match exactly.
-                        scale: root.exposed ? (isSelected && !flying ? zoom + (1 - zoom) * lookProgress
+                        // Flying, the selection's zoom grows and shrinks with the glide
+                        // rather than jumping when it starts or lands.
+                        scale: root.exposed ? (isSelected ? (flying ? 1 + (zoom - 1) * root.entranceProgress
+                                : zoom + (1 - zoom) * lookProgress)
                             : origin || !flying ? 1 : 0.94 + 0.06 * root.entranceProgress) : 1
                         Behavior on scale { enabled: card.glide; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                         function captureMetrics() {
