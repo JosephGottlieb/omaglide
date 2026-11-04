@@ -156,9 +156,14 @@ Item {
     property var liveChords: Shortcuts.currentChords([], shortAppId)
     readonly property bool blurBackground: settings.blurBackground !== false
     readonly property bool pointerFollowsFocus: settings.pointerFollowsFocus !== false
-    // Slider style: "thumbnails" (live previews) or "icons" (a Cmd+Tab-style
-    // row of app icons). Workspace mode always uses thumbnails.
-    readonly property string sliderStyle: settings.sliderStyle === "icons" ? "icons" : "thumbnails"
+    // Every surface is liquid glass (GlassPanel), so text is light everywhere.
+    readonly property color glassInk: "white"
+    // The theme's color singleton can be unresolved while delegates are
+    // created; a fallback keeps outlines and badges from going blank.
+    readonly property color accentColor: Color.accent ? Color.accent : "#5aa9ff"
+    // Slider style: "icons" (the default, a Cmd+Tab-style row of app icons)
+    // or "thumbnails" (live previews). Workspace mode always uses thumbnails.
+    readonly property string sliderStyle: settings.sliderStyle === "thumbnails" ? "thumbnails" : "icons"
     readonly property bool iconStyle: sliderStyle === "icons" && mode === "windows" && !exposed
     property string appliedSignature: ""
     property bool pendingApply: false
@@ -845,6 +850,7 @@ Item {
         function status(): string {
             return JSON.stringify({ open: root.open, mode: root.mode, count: root.windows.length, selected: root.selected,
                 carouselMode: root.carouselMode,
+                accentColor: String(root.accentColor),
                 exposed: root.exposed, closing: root.closing, sliderStyle: root.sliderStyle, iconStyle: root.iconStyle, appExposed: root.appExposed, appExposeClass: root.appExposeClass,
                 gestures: { enabled: root.gesturesEnabled, fingers: root.gestureFingers, status: root.gestureStatus,
                     conflicts: root.gestureConflicts },
@@ -1074,12 +1080,13 @@ Item {
                     y: root.exposed ? panel.gridTop + panel.gridHeight / 2 - height / 2 : Math.max(92, panel.carouselY - 44)
                     visible: (!root.exposed && !root.iconStyle) || !!root.errorMessage || !root.windows.length
                     width: headerText.implicitWidth + 28; height: 28; radius: 14
-                    color: Qt.alpha(Color.popups.background, 0.82)
+                    color: "transparent"
+                    GlassPanel { anchors.fill: parent; radius: parent.radius; density: 0.45; blurred: root.blurBackground }
                     Text {
                         id: headerText
                         anchors.centerIn: parent
                         text: root.errorMessage || (root.windows.length ? (root.mode === "workspaces" ? "WORKSPACES" : root.groupingActive ? "APPS" : "WINDOWS") + "  ·  " + (root.selected + 1) + " / " + root.windows.length : (root.searchQuery ? "No matches" : "Nothing to preview"))
-                        color: Color.popups.text; font.family: Style.font.family
+                        color: root.glassInk; font.family: Style.font.family
                         font.pixelSize: 12; font.letterSpacing: 2; opacity: 0.85
                     }
                 }
@@ -1090,7 +1097,8 @@ Item {
                     visible: root.exposed && root.appExposed && root.windows.length > 0
                     opacity: root.entranceProgress
                     width: appHeaderRow.implicitWidth + 28; height: 32; radius: 16
-                    color: Qt.alpha(Color.popups.background, 0.88)
+                    color: "transparent"
+                    GlassPanel { anchors.fill: parent; radius: parent.radius; density: 0.45; blurred: root.blurBackground }
                     Row {
                         id: appHeaderRow
                         anchors.centerIn: parent
@@ -1108,7 +1116,7 @@ Item {
                             text: appHeaderRow.app ? appHeaderRow.app.cls + "   ·   " + root.windows.length
                                 + (root.windows.length === 1 ? " window" : " windows") : ""
                             textFormat: Text.PlainText
-                            color: Color.popups.text; font.family: Style.font.family
+                            color: root.glassInk; font.family: Style.font.family
                             font.pixelSize: 13; font.weight: Font.Medium
                         }
                     }
@@ -1121,20 +1129,21 @@ Item {
                     spacing: 10
                     Rectangle {
                         width: Math.max(100, Math.min(460, panel.layoutWidth - 200)); height: 44; radius: 22
-                        color: Qt.alpha(Color.popups.background, 0.92)
-                        border.width: 1
-                        border.color: searchInput.activeFocus ? Qt.alpha(Color.accent, 0.8) : Qt.alpha(Color.foreground, 0.14)
+                        color: "transparent"
+                        GlassPanel { anchors.fill: parent; radius: parent.radius; density: 0.4; blurred: root.blurBackground }
+                        border.width: searchInput.activeFocus ? 1 : 0
+                        border.color: Qt.alpha(root.accentColor, 0.8)
                         Text {
                             anchors { left: parent.left; leftMargin: 16; verticalCenter: parent.verticalCenter }
                             text: "󰍉"
-                            color: Color.popups.text; opacity: 0.55
+                            color: root.glassInk; opacity: 0.55
                             font.family: Style.font.family; font.pixelSize: 17
                         }
                         TextInput {
                             id: searchInput
                             anchors { fill: parent; leftMargin: 42; rightMargin: 16; topMargin: 12; bottomMargin: 12 }
-                            color: Color.popups.text; selectionColor: Color.menu.selectedBackground
-                            selectedTextColor: Color.popups.text
+                            color: root.glassInk; selectionColor: Qt.rgba(1, 1, 1, 0.3)
+                            selectedTextColor: root.glassInk
                             font.family: Style.font.family; font.pixelSize: 15
                             clip: true; maximumLength: 256; selectByMouse: true
                             text: root.searchQuery
@@ -1146,7 +1155,7 @@ Item {
                                 anchors.fill: parent
                                 text: "Search windows or apps…"
                                 visible: !searchInput.text
-                                color: Color.popups.text; opacity: 0.5
+                                color: root.glassInk; opacity: 0.5
                                 font: searchInput.font
                             }
                         }
@@ -1154,14 +1163,15 @@ Item {
                     Rectangle {
                         id: gearButton
                         width: 44; height: 44; radius: 22
-                        color: gearMouse.containsMouse || root.settingsOpen
-                            ? Qt.tint(Color.popups.background, Qt.alpha(Color.foreground, 0.12))
-                            : Qt.alpha(Color.popups.background, 0.92)
-                        border.width: 1; border.color: Qt.alpha(Color.foreground, 0.14)
+                        color: "transparent"
+                        GlassPanel {
+                            anchors.fill: parent; radius: parent.radius; density: 0.4; blurred: root.blurBackground
+                            highlighted: gearMouse.containsMouse || root.settingsOpen
+                        }
                         Text {
                             anchors.centerIn: parent
                             text: "󰒓"
-                            color: Color.popups.text; opacity: gearMouse.containsMouse ? 1 : 0.75
+                            color: root.glassInk; opacity: gearMouse.containsMouse ? 1 : 0.75
                             font.family: Style.font.family; font.pixelSize: 20
                             rotation: gearMouse.containsMouse ? 45 : 0
                             Behavior on rotation { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
@@ -1206,8 +1216,8 @@ Item {
                             : flying && origin ? Logic.mixRect(origin, target, root.entranceProgress) : target
                         // Menu selection borders can be transparent, while popup
                         // borders use the accent. Neither role describes a tile.
-                        readonly property color frameColor: isSelected ? Qt.alpha(Color.accent, 1)
-                            : Qt.alpha(Color.foreground, root.exposed ? 0.14 : 0.22)
+                        readonly property color frameColor: isSelected ? Qt.alpha(root.accentColor, 1)
+                            : Qt.rgba(1, 1, 1, root.exposed ? 0.14 : 0.22)
                         readonly property int frameWidth: isSelected ? 3 : 1
                         readonly property real cornerRadius: root.exposed ? 12 + 4 * lookProgress : 14
                         readonly property bool nearViewport: !root.iconStyle
@@ -1266,9 +1276,12 @@ Item {
                             color: Qt.rgba(0, 0, 0, root.exposed ? 0.42 : 0.35)
                             visible: card.width > 0
                         }
+                        // Smoked glass behind the capture; only the slider's caption strip
+                        // shows. A single rectangle: the ring builds many of these at once.
                         Rectangle {
                             anchors.fill: parent; radius: card.cornerRadius
-                            color: Color.popups.background
+                            color: Qt.rgba(0.07, 0.07, 0.09, root.blurBackground ? 0.46 : 0.8)
+                            border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.2)
                         }
                         Rectangle {
                             anchors.fill: parent; radius: card.cornerRadius
@@ -1284,7 +1297,7 @@ Item {
                             anchors { left: parent.left; right: parent.right; top: parent.top; margins: root.exposed ? 0 : 3 }
                             height: card.previewHeight - (root.exposed ? 0 : 3)
                             radius: root.exposed ? card.cornerRadius : card.cornerRadius - 3
-                            color: Qt.alpha(Color.foreground, 0.04)
+                            color: Qt.rgba(1, 1, 1, 0.04)
                             Image {
                                 id: fallbackIcon
                                 anchors.centerIn: parent; width: 64; height: 64
@@ -1297,7 +1310,7 @@ Item {
                                 anchors.centerIn: parent
                                 text: (card.win.cls || "?").charAt(0).toUpperCase()
                                 font.family: Style.font.family; font.pixelSize: 48
-                                color: Color.popups.text; opacity: 0.55
+                                color: root.glassInk; opacity: 0.55
                                 visible: root.mode === "windows" && fallbackIcon.status !== Image.Ready && (!captureLoader.item || !captureLoader.item.hasContent)
                             }
                             Loader {
@@ -1391,13 +1404,14 @@ Item {
                             anchors { horizontalCenter: parent.horizontalCenter; top: parent.bottom; topMargin: badgeIcon.visible ? 24 : 8 }
                             width: Math.min(Math.max(card.width + 80, 160), titleText.implicitWidth + 24, panel.layoutWidth - 32); height: 26; radius: 13
                             z: 2
-                            color: Qt.alpha(Color.popups.background, 0.92)
+                            color: "transparent"
+                            GlassPanel { anchors.fill: parent; radius: parent.radius; density: 0.55; blurred: root.blurBackground }
                             Text {
                                 id: titleText
                                 anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
                                 verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignHCenter
                                 text: card.win.title; elide: Text.ElideRight; textFormat: Text.PlainText
-                                color: Color.popups.text; font.family: Style.font.family
+                                color: root.glassInk; font.family: Style.font.family
                                 font.pixelSize: 12; font.weight: Font.Medium
                             }
                         }
@@ -1421,14 +1435,14 @@ Item {
                                     anchors.centerIn: parent
                                     text: root.mode === "workspaces" ? "▦" : (card.win.cls || "?").charAt(0).toUpperCase()
                                     font.family: Style.font.family; font.pixelSize: 19; font.bold: true
-                                    color: Color.popups.text; visible: root.mode === "workspaces" || appIcon.status !== Image.Ready
+                                    color: root.glassInk; visible: root.mode === "workspaces" || appIcon.status !== Image.Ready
                                 }
                             }
                             Column {
                                 width: Math.max(1, card.width - (captionIcon.visible ? 70 : 20)); spacing: 2
                                 Text {
                                     width: parent.width; elide: Text.ElideRight; text: card.win.title
-                                    color: Color.popups.text; font.family: Style.font.family
+                                    color: root.glassInk; font.family: Style.font.family
                                     font.pixelSize: 13; font.weight: Font.DemiBold
                                 }
                                 Text {
@@ -1438,7 +1452,7 @@ Item {
                                         ? card.win.count + (card.win.count === 1 ? " window" : " windows") + "  ·  " + card.win.monitorName
                                         : card.win.cls + (card.win.grouped ? "  ·  " + card.win.count + (card.win.count === 1 ? " window" : " windows") : "")
                                             + "  ·  Workspace " + card.win.workspaceName
-                                    color: Color.popups.text; opacity: 0.58
+                                    color: root.glassInk; opacity: 0.58
                                     font.family: Style.font.family; font.pixelSize: 10
                                 }
                             }
@@ -1504,30 +1518,8 @@ Item {
                     width: count * cell + Math.max(0, count - 1) * gap + 36
                     height: cell + 36 + 30
                     opacity: root.open ? 1 : 0
-                    // Liquid glass: a nearly clear pane over the compositor's blur of
-                    // the desktop (only pixels this panel covers are blurred), a soft
-                    // top sheen and bright hairline edges. Without blur it needs a
-                    // denser tint to stay legible.
-                    readonly property real glassTint: root.blurBackground ? 0.10 : 0.42
-                    RectangularShadow {
-                        anchors.fill: parent; radius: 30; blur: 48; offset.y: 18
-                        color: Qt.rgba(0, 0, 0, 0.28)
-                    }
-                    Rectangle {
-                        anchors.fill: parent; radius: 30
-                        color: root.blurBackground ? Qt.rgba(1, 1, 1, iconSwitcher.glassTint) : Qt.rgba(0.08, 0.08, 0.1, iconSwitcher.glassTint + 0.3)
-                        border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.34)
-                    }
-                    Rectangle {
-                        anchors { fill: parent; margins: 1 }
-                        radius: 29
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.20) }
-                            GradientStop { position: 0.45; color: Qt.rgba(1, 1, 1, 0.04) }
-                            GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0.08) }
-                        }
-                        border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.10)
-                    }
+                    // Lighter than the chrome: the icons carry it, like Cmd+Tab.
+                    GlassPanel { anchors.fill: parent; radius: 30; density: 0.3; blurred: root.blurBackground }
                     Row {
                         x: 18; y: 18
                         spacing: iconSwitcher.gap
@@ -1569,11 +1561,11 @@ Item {
                                     visible: root.groupingActive && iconItem.win.count > 1
                                     anchors { right: parent.right; top: parent.top; margins: 4 }
                                     width: Math.max(18, iconCount.implicitWidth + 8); height: 18; radius: 9
-                                    color: Color.accent
+                                    color: root.accentColor
                                     Text {
                                         id: iconCount
                                         anchors.centerIn: parent; text: iconItem.win.count || ""
-                                        color: Color.background; font.family: Style.font.family
+                                        color: root.glassInk; font.family: Style.font.family
                                         font.pixelSize: 10; font.weight: Font.DemiBold
                                     }
                                 }
@@ -1654,7 +1646,7 @@ Item {
                                 id: thumbnail
                                 width: parent.width; height: overviewStrip.thumbnailHeight
                                 radius: 6
-                                color: Color.popups.background
+                                color: Qt.rgba(0.07, 0.07, 0.09, 0.45)
                                 Image {
                                     id: thumbnailFallback
                                     anchors.centerIn: parent
@@ -1668,7 +1660,7 @@ Item {
                                 Text {
                                     anchors.centerIn: parent
                                     text: (overviewItem.win.cls || "?").charAt(0).toUpperCase()
-                                    color: Color.popups.text; font.family: Style.font.family
+                                    color: root.glassInk; font.family: Style.font.family
                                     font.pixelSize: Math.min(32, parent.height / 2)
                                     visible: root.mode === "windows" && thumbnailFallback.status !== Image.Ready
                                         && (!windowThumbnail.item || !windowThumbnail.item.hasContent)
@@ -1731,14 +1723,14 @@ Item {
                                 Rectangle {
                                     anchors.fill: parent; color: "transparent"; z: 2; radius: 6
                                     border.width: 1
-                                    border.color: Qt.alpha(Color.foreground, overviewItem.isSelected ? 0.4 : 0.12)
+                                    border.color: Qt.rgba(1, 1, 1, overviewItem.isSelected ? 0.4 : 0.12)
                                 }
                                 Text {
                                     anchors.fill: parent; z: 3
                                     text: root.mode === "workspaces" ? overviewItem.win.workspaceName : ""
                                     textFormat: Text.PlainText; elide: Text.ElideRight
                                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                                    color: Color.accent; opacity: 0.85
+                                    color: root.accentColor; opacity: 0.85
                                     font.family: Style.font.family; font.pixelSize: parent.height * 0.7
                                     font.weight: Font.Medium
                                 }
@@ -1746,11 +1738,11 @@ Item {
                                     anchors { top: parent.top; right: parent.right; margins: 5 }
                                     visible: root.groupingActive && overviewItem.win.count > 1
                                     width: groupCount.implicitWidth + 10; height: 20; radius: 5; z: 4
-                                    color: Color.popups.background
+                                    color: Qt.rgba(0.07, 0.07, 0.09, 0.7)
                                     Text {
                                         id: groupCount
                                         anchors.centerIn: parent; text: overviewItem.win.count || 1
-                                        color: Color.popups.text; font.family: Style.font.family; font.pixelSize: 11
+                                        color: root.glassInk; font.family: Style.font.family; font.pixelSize: 11
                                     }
                                 }
                             }
@@ -1775,7 +1767,7 @@ Item {
                                             text: (modelData.cls || "?").charAt(0).toUpperCase()
                                             visible: smallIcon.status !== Image.Ready
                                             font.family: Style.font.family; font.pixelSize: parent.width
-                                            color: Color.popups.text
+                                            color: root.glassInk
                                         }
                                     }
                                 }
@@ -1787,7 +1779,8 @@ Item {
                                 visible: overviewItem.isSelected
                                 anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                                 height: 22; radius: 11
-                                color: Color.accent
+                                color: "transparent"
+                                GlassPanel { anchors.fill: parent; radius: parent.radius; density: 0.5; blurred: root.blurBackground; highlighted: true; raised: false }
                                 Row {
                                     anchors { fill: parent; leftMargin: 6; rightMargin: 8 }
                                     spacing: 5
@@ -1810,7 +1803,7 @@ Item {
                                             : overviewItem.win.title
                                         textFormat: Text.PlainText; elide: Text.ElideRight
                                         horizontalAlignment: barIcon.visible ? Text.AlignLeft : Text.AlignHCenter
-                                        color: Color.background
+                                        color: root.glassInk
                                         font.family: Style.font.family; font.pixelSize: 11; font.weight: Font.DemiBold
                                     }
                                 }
@@ -1853,7 +1846,8 @@ Item {
                         visible: !!quickLookLayer.win
                         opacity: root.quickLookProgress
                         width: Math.min(parent.width - 48, quickLookTitle.implicitWidth + 64); height: 36; radius: 18
-                        color: Qt.alpha(Color.popups.background, 0.92)
+                        color: "transparent"
+                        GlassPanel { anchors.fill: parent; radius: parent.radius; density: 0.55; blurred: root.blurBackground }
                         Image {
                             id: quickLookIcon
                             anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
@@ -1867,7 +1861,7 @@ Item {
                             anchors { left: quickLookIcon.right; leftMargin: 10; right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
                             text: quickLookLayer.win ? quickLookLayer.win.title + "   ·   Workspace " + quickLookLayer.win.workspaceName : ""
                             elide: Text.ElideRight; textFormat: Text.PlainText
-                            color: Color.popups.text; font.family: Style.font.family
+                            color: root.glassInk; font.family: Style.font.family
                             font.pixelSize: 14; font.weight: Font.Medium
                         }
                     }
@@ -1882,12 +1876,13 @@ Item {
                         anchors { horizontalCenter: parent.horizontalCenter; top: quickLookFrame.bottom; topMargin: 14 }
                         opacity: root.quickLookProgress
                         width: quickLookHint.implicitWidth + 28; height: 28; radius: 14
-                        color: Qt.alpha(Color.popups.background, 0.82)
+                        color: "transparent"
+                        GlassPanel { anchors.fill: parent; radius: parent.radius; density: 0.45; blurred: root.blurBackground }
                         Text {
                             id: quickLookHint
                             anchors.centerIn: parent
                             text: "Space or Esc to close   ·   ←/→ browse   ·   Enter or click to switch"
-                            color: Color.popups.text; opacity: 0.75
+                            color: root.glassInk; opacity: 0.75
                             font.family: Style.font.family; font.pixelSize: 12
                         }
                     }
@@ -1903,7 +1898,7 @@ Item {
                     visible: opacity > 0
                     opacity: root.settingsOpen ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 140 } }
-                    Rectangle { anchors.fill: parent; radius: Math.min(18, height / 2); color: Qt.alpha(Color.popups.background, 0.82) }
+                    GlassPanel { anchors.fill: parent; radius: Math.min(18, height / 2); density: 0.5; blurred: root.blurBackground }
                     Column {
                         id: hints
                         anchors.centerIn: parent
@@ -1914,7 +1909,7 @@ Item {
                             width: Math.min(implicitWidth, footer.parent.width - 80); horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap; textFormat: Text.PlainText
                             text: root.shortcutText
-                            color: Color.popups.text; opacity: 0.9
+                            color: root.glassInk; opacity: 0.9
                             font.family: Style.font.family; font.pixelSize: 12
                         }
                         Text {
@@ -1922,7 +1917,7 @@ Item {
                             width: Math.min(implicitWidth, footer.parent.width - 80); horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap; textFormat: Text.PlainText
                             text: root.controlsText
-                            color: Color.popups.text; opacity: 0.65
+                            color: root.glassInk; opacity: 0.65
                             font.family: Style.font.family; font.pixelSize: 12
                         }
                     }

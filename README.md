@@ -85,10 +85,15 @@ keeps that gesture and Settings says so. Settings also warns when libinput's
 three-finger drag (`input:touchpad:drag_3fg`) is using the chosen finger count,
 because those swipes then never reach Hyprland.
 
-**Slider style** in Settings switches the slider between **Thumbnails** (live
-previews with the filmstrip) and **App icons**: a Cmd+Tab-style frosted panel
-with one large icon per app, the selected window's title underneath, no
-screen dimming and no live captures (`sliderStyle`). The search bar appears
+**Slider style** in Settings switches the slider between **App icons** (the
+default): a Cmd+Tab-style glass panel with one large icon per app, the
+selected window's title underneath, no screen dimming and no live captures,
+and **Thumbnails** (live previews with the filmstrip) (`sliderStyle`).
+
+Every OmaGlide surface (search bar, buttons, labels, caption strips, Settings,
+the icon panel) is the same liquid glass: a smoked tint over the compositor's
+blur of the desktop, with a soft sheen and hairline edges, and light text.
+It does not depend on the theme's popup colors. The search bar appears
 once you type; Ctrl+, opens Settings. Workspace mode always uses thumbnails.
 
 Settings also toggles the frosted background (`blurBackground`), app grouping

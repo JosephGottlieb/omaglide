@@ -39,7 +39,7 @@ runtime = compositor.runtime
 fixture = runtime.parent / "shell.qml"
 if fixture.exists():
     raise RuntimeError("Refusing to overwrite an existing test fixture")
-for name in ("Carousel.qml", "SettingsPanel.qml", "WorkspacePreview.qml", "logic.js", "workspace.js", "shortcuts.js"):
+for name in ("Carousel.qml", "SettingsPanel.qml", "GlassPanel.qml", "WorkspacePreview.qml", "logic.js", "workspace.js", "shortcuts.js"):
     shutil.copy2(source / name, runtime.parent / name)
 shutil.copy2(source / "tests/WorkspaceHarness.qml", fixture)
 (runtime.parent / "Commons").symlink_to("/usr/share/omarchy/shell/Commons", target_is_directory=True)

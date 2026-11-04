@@ -33,7 +33,7 @@ runtime = compositor.runtime
 fixture = runtime.parent / "shell.qml"
 if fixture.exists():
     raise RuntimeError("Refusing to overwrite an existing test fixture")
-for name in ("Carousel.qml", "SettingsPanel.qml", "WorkspacePreview.qml", "logic.js", "workspace.js", "shortcuts.js"):
+for name in ("Carousel.qml", "SettingsPanel.qml", "GlassPanel.qml", "WorkspacePreview.qml", "logic.js", "workspace.js", "shortcuts.js"):
     shutil.copy2(source / name, runtime.parent / name)
 if args.carousel_source:
     shutil.copy2(args.carousel_source, runtime.parent / "Carousel.qml")

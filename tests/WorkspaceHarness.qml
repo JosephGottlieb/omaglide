@@ -22,7 +22,8 @@ ShellRoot {
             return true
         }
     }
-    Switcher.Carousel { id: carousel; shell: memoryShell; shortAppId: "omaglide-workspace-test"; groupApps: false }
+    // The slider checks exercise live thumbnails; App icons is the product default.
+    Switcher.Carousel { id: carousel; shell: memoryShell; shortAppId: "omaglide-workspace-test"; groupApps: false; settings: ({ sliderStyle: "thumbnails" }) }
     Connections {
         target: carousel
         function onOpenChanged() {
