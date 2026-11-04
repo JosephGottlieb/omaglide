@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix: letting go mid-swipe could leave Exposé frozen part-way. Hyprland's
+  gesture parser only reads a release callback named `finish` (a field named
+  `end` is silently ignored), so the release never reached OmaGlide; it now
+  registers `finish`, and sessions reload into the fixed swipes automatically.
+
 - Swipes follow the fingers. Exposé opens as soon as Hyprland recognises the
   swipe and tracks it in real time, instead of waiting for the fingers to lift;
   releasing finishes or springs back from wherever they stopped. Sessions

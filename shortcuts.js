@@ -232,15 +232,16 @@ function blurLua(appId, enabled, fresh) {
 // and Hyprland suppresses gestures under that inhibitor too, so the
 // swipes that leave Exposé need disable_inhibit. The "+ni" revision marker
 // makes sessions still holding the older swipes reload into these.
-// The swipes are tracked: Hyprland calls start, update and end while the
-// fingers move, and each call is forwarded as a custom socket event,
+// The swipes are tracked: Hyprland calls start, update and finish while the
+// fingers move and when they lift (its parser reads "finish" and silently
+// ignores a field named "end"). Each call is forwarded as a custom socket event,
 // "<appId>:swipe:<direction>:<phase>:<progress>", where progress is the
 // distance travelled in the swipe's direction over Hyprland's own
-// workspace_swipe_distance. A "+t" marker on the registration makes an older
-// one-shot registration reload into this one.
+// workspace_swipe_distance. The "+f" marker on the registration makes older
+// ones (one-shot, or tracked without a working release) reload into this one.
 function gestureLua(appId, enabled, fingers) {
     const count = Number(fingers) === 4 ? 4 : 3;
-    const want = enabled ? count + "+ni+t" : "off";
+    const want = enabled ? count + "+ni+f" : "off";
     const lines = [
         "local want = " + luaString(want),
         "local have = _G.omaglide_gestures or \"off\"",
@@ -269,7 +270,7 @@ function gestureLua(appId, enabled, fingers) {
             "  return {",
             "    start = function(event) travelled = 0; moved(event); emit(\"start\") end,",
             "    update = function(event) moved(event); emit(\"update\") end,",
-            "    [\"end\"] = function() emit(\"end\") end,",
+            "    finish = function() emit(\"end\") end,",
             "  }",
             "end");
         // libinput reports upward motion as negative y.
